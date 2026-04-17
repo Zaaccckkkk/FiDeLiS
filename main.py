@@ -30,6 +30,27 @@ os.environ["OPENAI_API_KEY"] = config["OPENAI_API_KEY"]
 
 def disable_logging_during_run():
    logging.disable(logging.CRITICAL)
+
+
+def init_wandb(args):
+   wandb_mode = os.getenv("WANDB_MODE")
+   if wandb_mode is None and args.debug:
+      wandb_mode = "offline"
+
+   init_kwargs = {
+      "project": "rog",
+      "name": f"{args.d}-{args.model_name}-{args.sample}",
+      "config": vars(args),
+   }
+   if wandb_mode is not None:
+      init_kwargs["mode"] = wandb_mode
+
+   try:
+      return wandb.init(**init_kwargs)
+   except Exception as e:
+      logging.warning("wandb initialization failed; continuing without wandb. Error: %s", e)
+      print(f"wandb initialization failed; continuing without wandb. Error: {e}")
+      return None
    
 
 def prepare_dataset(sample):
@@ -121,7 +142,7 @@ def main(args):
    if not args.debug:
       disable_logging_during_run() 
    
-   wandb.init(project="rog", name=f"{args.d}-{args.model_name}-{args.sample}", config=args)
+   wandb_run = init_wandb(args)
    
    # load the dataset
    cached_dataset_path = os.path.join(args.save_cache, f"{args.d}_processed")
@@ -164,7 +185,7 @@ def main(args):
             f.write(json_str + "\n")
             continue
       
-      if args.debug:
+      if args.debug and wandb_run is not None:
          for span in wandb_span:
             span.log(name="openai")
          
@@ -175,10 +196,11 @@ def main(args):
    # evaluate
    llm_res, direct_ans_res = eval_result(os.path.join(output_dir, f"{args.d}-{args.model_name}-{args.sample}.jsonl"), cal_f1=True)
    
-   wandb.log({
-      "llm_res": llm_res,
-      "direct_ans_res": direct_ans_res
-   })
+   if wandb_run is not None:
+      wandb.log({
+         "llm_res": llm_res,
+         "direct_ans_res": direct_ans_res
+      })
 
 if __name__ == "__main__":
    parser = argparse.ArgumentParser()

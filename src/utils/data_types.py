@@ -65,6 +65,15 @@ class Graph:
       edges_attributes = [edge.attribute for edge in self.edges.values()]
       embeddings = self.embedder.get_embeddings(nodes_attributes)
       embeddings_edges = self.embedder.get_embeddings(edges_attributes)
+
+      if len(embeddings) != len(nodes_attributes):
+         raise ValueError(
+            f"Expected {len(nodes_attributes)} node embeddings for graph `{self.nodes_embedding_path}`, got {len(embeddings)}."
+         )
+      if len(embeddings_edges) != len(edges_attributes):
+         raise ValueError(
+            f"Expected {len(edges_attributes)} edge embeddings for graph `{self.edges_embedding_path}`, got {len(embeddings_edges)}."
+         )
       
       for i, node in enumerate(self.graph.nodes()):
          self.nodes[node].set_embedding(embeddings[i])

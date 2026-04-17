@@ -4,6 +4,10 @@ from openai import OpenAI
 from litellm import completion, embedding, batch_completion # import litellm for calling multiple llms using the same input/output format
 
 
+class LLMBackboneError(RuntimeError):
+   pass
+
+
 class LLM_Backbone():
    def __init__(self, args):
       self.client = OpenAI()
@@ -12,11 +16,22 @@ class LLM_Backbone():
       self.max_attempt = 5 # number of attempts to get the completion
       
    def get_embeddings(self, texts: list):
+      if isinstance(texts, str):
+         texts = [texts]
+      elif texts is None:
+         raise LLMBackboneError("Cannot request embeddings for `None` input.")
+      elif not isinstance(texts, list):
+         texts = list(texts)
+
+      if not texts:
+         return []
+
       embeddings = []
       texts_per_batch = 2000
       text_chunks = [texts[i:i + texts_per_batch] for i in range(0, len(texts), texts_per_batch)]
       
       attempt = 0
+      last_error = None
       while attempt < self.max_attempt:
          try:
             for chunk in text_chunks:
@@ -28,8 +43,13 @@ class LLM_Backbone():
             return embeddings
          except Exception as e:
             logging.error(f"Error occurred: {e}")
+            last_error = e
             attempt += 1
             time.sleep(1)
+      raise LLMBackboneError(
+         f"Failed to fetch embeddings with model `{self.embedding_model}` after {self.max_attempt} attempts. "
+         f"Last error: {last_error}"
+      ) from last_error
             
    def get_completion(self, prompt: dict):
       messages = [
@@ -39,6 +59,7 @@ class LLM_Backbone():
       ]
          
       attempt = 0
+      last_error = None
       while attempt < self.max_attempt:
          try:
                _ = self.client.chat.completions.create(
@@ -52,8 +73,13 @@ class LLM_Backbone():
                return _.choices[0].message.content
          except Exception as e:
                logging.error(f"Error occurred: {e}")
+               last_error = e
                attempt += 1
                time.sleep(1)
+      raise LLMBackboneError(
+         f"Failed to fetch a chat completion with model `{self.completion_model}` after {self.max_attempt} attempts. "
+         f"Last error: {last_error}"
+      ) from last_error
                
    def get_log_probs(self, log_probs: list):
       scores = []
@@ -86,6 +112,7 @@ class LLM_Backbone():
                ]
          )
       attempt = 0
+      last_error = None
       while attempt < 5: 
          try:
                _ = batch_completion(
@@ -102,8 +129,13 @@ class LLM_Backbone():
                
          except Exception as e:
                logging.error(f"Error occurred: {e}")
+               last_error = e
                attempt += 1
                time.sleep(1)
+      raise LLMBackboneError(
+         f"Failed to fetch batch completions with model `{self.completion_model}` after 5 attempts. "
+         f"Last error: {last_error}"
+      ) from last_error
                
                
 async def get_embedding(session, texts, model="text-embedding-3-small"):

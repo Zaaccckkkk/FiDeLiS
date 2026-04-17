@@ -21,3 +21,4 @@ webq.log
 .DS_Store
 .venv/
 tea_debug.log
+cache/
