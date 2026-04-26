@@ -5,6 +5,7 @@ logs/
 ref_examples/
 results/
 results_final_test/
+results_grid*/
 results/gen_rule_path/
 results/KGQA/
 results/gpt-3.5-turbo-0125

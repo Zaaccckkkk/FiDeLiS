@@ -224,6 +224,8 @@ def main(args):
    
    # sample the dataset
    if args.sample != -1:
+      if args.seed is not None:
+         dataset = dataset.shuffle(seed=args.seed)
       dataset = dataset.select(range(args.sample))
    
    llm_navigator = LLM_Navigator(args)
@@ -266,6 +268,7 @@ if __name__ == "__main__":
    parser = argparse.ArgumentParser()
    parser.add_argument("--N_CPUS", type=int, default=mp.cpu_count())
    parser.add_argument("--sample", type=int, default=-1)
+   parser.add_argument("--seed", type=int, default=None)
    parser.add_argument("--data_path", type=str, default="rmanluo")
    parser.add_argument("--crlt_path", type=str, default=os.path.join("datasets", "crlt", "CR-LT-QA.json"))
    parser.add_argument("--d", "-d", type=str, choices=["RoG-webqsp", "RoG-cwq", "CL-LT-KGQA"], default="RoG-webqsp")
