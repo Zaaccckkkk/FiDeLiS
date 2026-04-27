@@ -1,0 +1,18 @@
+{
+  "output_label_file": "router_labels\\RoG-webqsp_train_router_labels.jsonl",
+  "runtime_error_file": "router_labels\\RoG-webqsp_train_router_runtime_errors.jsonl",
+  "skipped_ids_file": "router_labels\\RoG-webqsp_train_router_skipped_ids.jsonl",
+  "target_count": 100,
+  "usable_label_rows": 100,
+  "resolved_count": 50,
+  "unresolved_count": 50,
+  "skipped_runtime_error_samples": 5,
+  "duplicate_ids_in_label_file": [],
+  "duplicate_ids_in_skipped_file": [],
+  "bad_json_rows": {
+    "label_file": [],
+    "skipped_ids_file": []
+  },
+  "target_count_reached": true,
+  "timestamp": "2026-04-27T17:51:54"
+}
