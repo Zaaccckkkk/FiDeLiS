@@ -55,6 +55,16 @@ def read_config(run_dir):
         return {}
 
 
+def is_prediction_jsonl(path):
+    if path.name == "selected_ids.jsonl":
+        return False
+    if path.name.endswith("_error.jsonl"):
+        return False
+    if "detailed_eval" in path.name:
+        return False
+    return path.suffix == ".jsonl"
+
+
 def infer_from_prediction_file(path, model_name):
     name = path.name
     sample_size = None
@@ -115,7 +125,7 @@ def main():
     run_dirs = sorted([p for p in model_root.iterdir() if p.is_dir()], key=lambda p: p.stat().st_mtime, reverse=True)
     for run_dir in run_dirs:
         prediction_files = sorted(run_dir.glob("*.jsonl"))
-        prediction_files = [p for p in prediction_files if not p.name.endswith("_error.jsonl") and "detailed_eval" not in p.name]
+        prediction_files = [p for p in prediction_files if is_prediction_jsonl(p)]
         if not prediction_files:
             continue
         config = read_config(run_dir)

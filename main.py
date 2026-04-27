@@ -177,6 +177,31 @@ def init_embedding(data):
    print(f"Embedding for {id} completed")
 
 
+def write_selected_ids(dataset, args, output_dir):
+   selected_ids_path = os.path.join(output_dir, "selected_ids.jsonl")
+   with open(selected_ids_path, "w", encoding="utf-8") as f:
+      for data in dataset:
+         f.write(json.dumps({
+            "dataset": args.d,
+            "id": data.get("id"),
+            "question": data.get("question", "")
+         }) + "\n")
+
+
+def select_sample(dataset, args, output_dir=None):
+   if args.sample == -1:
+      if output_dir is not None:
+         write_selected_ids(dataset, args, output_dir)
+      return dataset
+
+   sample_size = min(args.sample, len(dataset))
+   dataset = dataset.shuffle(seed=args.seed)
+   dataset = dataset.select(range(sample_size))
+   if output_dir is not None:
+      write_selected_ids(dataset, args, output_dir)
+   return dataset
+
+
 def main(args):
    load_openai_key()
    if not os.environ.get("OPENAI_API_KEY"):
@@ -223,10 +248,7 @@ def main(args):
       return
    
    # sample the dataset
-   if args.sample != -1:
-      if args.seed is not None:
-         dataset = dataset.shuffle(seed=args.seed)
-      dataset = dataset.select(range(args.sample))
+   dataset = select_sample(dataset, args, output_dir)
    
    llm_navigator = LLM_Navigator(args)
    for data in tqdm(dataset, desc="Data Processing...", delay=0.5, ascii="░▒█"):
@@ -268,7 +290,7 @@ if __name__ == "__main__":
    parser = argparse.ArgumentParser()
    parser.add_argument("--N_CPUS", type=int, default=mp.cpu_count())
    parser.add_argument("--sample", type=int, default=-1)
-   parser.add_argument("--seed", type=int, default=None)
+   parser.add_argument("--seed", type=int, default=42)
    parser.add_argument("--data_path", type=str, default="rmanluo")
    parser.add_argument("--crlt_path", type=str, default=os.path.join("datasets", "crlt", "CR-LT-QA.json"))
    parser.add_argument("--d", "-d", type=str, choices=["RoG-webqsp", "RoG-cwq", "CL-LT-KGQA"], default="RoG-webqsp")

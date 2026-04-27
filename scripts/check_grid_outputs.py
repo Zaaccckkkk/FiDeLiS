@@ -71,6 +71,16 @@ def count_error_lines(prediction_file):
     return len(lines), True, lines[:3]
 
 
+def is_prediction_jsonl(path):
+    if path.name == "selected_ids.jsonl":
+        return False
+    if path.name.endswith("_error.jsonl"):
+        return False
+    if "detailed_eval" in path.name:
+        return False
+    return path.suffix == ".jsonl"
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--results_path", type=str, default="results_grid")
@@ -92,7 +102,7 @@ def main():
 
     for run_dir in sorted([p for p in model_root.iterdir() if p.is_dir()]):
         prediction_files = sorted(run_dir.glob("*.jsonl"))
-        prediction_files = [p for p in prediction_files if not p.name.endswith("_error.jsonl") and "detailed_eval" not in p.name]
+        prediction_files = [p for p in prediction_files if is_prediction_jsonl(p)]
         if not prediction_files:
             row = {
                 "dataset": "UNKNOWN",
