@@ -9,10 +9,10 @@ except ImportError:
 
 class LLM_Backbone():
    def __init__(self, args):
-      self.client = OpenAI()
+      self.client = OpenAI(timeout=getattr(args, "openai_timeout", 60))
       self.embedding_model = args.embedding_model
       self.completion_model = args.model_name
-      self.max_attempt = 5 # number of attempts to get the completion
+      self.max_attempt = getattr(args, "openai_max_attempts", 5) # number of attempts to get the completion
       
    def get_embeddings(self, texts: list):
       embeddings = []
