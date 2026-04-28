@@ -1,5 +1,6 @@
 import argparse
 import copy
+import csv
 import datetime
 import json
 import logging
@@ -28,13 +29,39 @@ from src.llm_navigator import LLM_Navigator  # noqa: E402
 MAX_LENGTHS = [1, 2, 3, 4]
 TOP_KS = [1, 2, 3, 5]
 BOOLEAN_ANSWERS = {"true", "false"}
+LABEL_CSV_FIELDS = [
+    "benchmark",
+    "split",
+    "id",
+    "question",
+    "q_entities",
+    "ground_truth",
+    "hop",
+    "status",
+    "label",
+    "attempts",
+]
 
 
-def config_grid():
+def parse_csv_ints(value):
+    values = []
+    for item in str(value).split(","):
+        item = item.strip()
+        if not item:
+            continue
+        values.append(int(item))
+    if not values:
+        raise argparse.ArgumentTypeError("Expected at least one comma-separated integer.")
+    return values
+
+
+def config_grid(max_lengths=None, top_ks=None):
+    max_lengths = max_lengths or MAX_LENGTHS
+    top_ks = top_ks or TOP_KS
     configs = [
         {"max_length": max_length, "top_k": top_k, "cost": max_length * top_k}
-        for max_length in MAX_LENGTHS
-        for top_k in TOP_KS
+        for max_length in max_lengths
+        for top_k in top_ks
     ]
     return sorted(configs, key=lambda item: (item["cost"], item["max_length"], item["top_k"]))
 
@@ -81,7 +108,7 @@ def load_train_dataset(args):
     cached_dataset_path = os.path.join(args.save_cache, cache_name)
     if os.path.exists(cached_dataset_path):
         dataset = load_from_disk(cached_dataset_path)
-        if args.benchmark != "CL-LT-KGQA":
+        if args.benchmark != "CR-LT-KGQA":
             return dataset
     else:
         if args.benchmark in ["RoG-webqsp", "RoG-cwq"]:
@@ -91,7 +118,7 @@ def load_train_dataset(args):
                 input_file = f"{args.data_path.rstrip('/')}/{args.benchmark}"
             dataset = load_dataset(input_file, split="train", cache_dir=args.save_cache)
             dataset = dataset.map(prepare_dataset, num_proc=args.N_CPUS if args.N_CPUS > 1 else None)
-        elif args.benchmark == "CL-LT-KGQA":
+        elif args.benchmark == "CR-LT-KGQA":
             input_file = os.path.join(args.crlt_data_dir, "CR-LT-QA-Wikidata-Cache.jsonl")
             dataset = load_dataset("json", data_files=input_file, split="train", cache_dir=args.save_cache)
             dataset = dataset.map(prepare_crlt_sample, num_proc=args.N_CPUS if args.N_CPUS > 1 else None)
@@ -110,7 +137,7 @@ def load_train_dataset(args):
         lambda x: x.get("q_entity") is not None,
         num_proc=args.N_CPUS if args.N_CPUS > 1 else None,
     )
-    if args.benchmark == "CL-LT-KGQA":
+    if args.benchmark == "CR-LT-KGQA":
         dataset = dataset.filter(
             lambda x: is_boolean_answer(x.get("a_entity")),
             num_proc=args.N_CPUS if args.N_CPUS > 1 else None,
@@ -138,6 +165,7 @@ def make_fidelis_args(args, max_length, top_k):
         strategy=args.strategy,
         squeeze=True,
         verifier=args.verifier,
+        disable_termination_verification=args.disable_termination_verification,
         embedding_model=args.embedding_model,
         add_hop_information=args.add_hop_information,
         generate_embeddings=False,
@@ -205,7 +233,7 @@ def score_boolean_prediction(prediction, answer):
 
 
 def score_for_benchmark(prediction, answer, benchmark):
-    if benchmark == "CL-LT-KGQA" and is_boolean_answer(answer):
+    if benchmark == "CR-LT-KGQA" and is_boolean_answer(answer):
         return score_boolean_prediction(prediction, answer)
     return score_prediction(prediction, answer)
 
@@ -242,6 +270,44 @@ def append_jsonl(path, item):
     with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(item, ensure_ascii=True) + "\n")
         f.flush()
+
+
+def csv_value(value):
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=True)
+    return value
+
+
+def append_csv(path, item):
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    write_header = not os.path.exists(path) or os.path.getsize(path) == 0
+    with open(path, "a", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=LABEL_CSV_FIELDS)
+        if write_header:
+            writer.writeheader()
+        writer.writerow({field: csv_value(item.get(field)) for field in LABEL_CSV_FIELDS})
+        f.flush()
+
+
+def write_csv(path, rows):
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=LABEL_CSV_FIELDS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: csv_value(row.get(field)) for field in LABEL_CSV_FIELDS})
+
+
+def append_label_outputs(args, record):
+    append_jsonl(args.output_label_file, record)
+    append_csv(args.output_csv_file, record)
+
+
+def sync_csv_from_label_file(args):
+    rows, _ = read_jsonl(args.output_label_file)
+    write_csv(args.output_csv_file, rows)
 
 
 def read_jsonl(path):
@@ -305,6 +371,7 @@ def archive_existing_outputs(args):
     archive_dir = os.path.join(args.output_dir, "archive", datetime.datetime.now().strftime("%Y%m%d_%H%M%S"))
     paths = {
         args.output_label_file,
+        args.output_csv_file,
         args.runtime_error_file,
         args.skipped_ids_file,
         args.output_label_file.replace(".jsonl", "_errors.jsonl"),
@@ -374,6 +441,7 @@ def clean_existing_label_file(args):
             "timestamp": timestamp(),
             "output_paths": {
                 "output_label_file": args.output_label_file,
+                "output_csv_file": args.output_csv_file,
                 "runtime_error_file": args.runtime_error_file,
                 "skipped_ids_file": args.skipped_ids_file,
             },
@@ -421,6 +489,7 @@ def validate_outputs(args):
     unresolved_count = sum(1 for row in labels if row.get("status") == "unresolved")
     summary = {
         "output_label_file": args.output_label_file,
+        "output_csv_file": args.output_csv_file,
         "runtime_error_file": args.runtime_error_file,
         "skipped_ids_file": args.skipped_ids_file,
         "target_count": args.target_count,
@@ -455,19 +524,33 @@ def validate_outputs(args):
     return summary
 
 
+def default_output_csv_file(output_label_file):
+    root, ext = os.path.splitext(output_label_file)
+    if ext == ".jsonl":
+        return root + ".csv"
+    return output_label_file + ".csv"
+
+
+def resolve_output_paths(args):
+    if args.output_file and args.output_label_file == parser_default_output_label_file():
+        args.output_label_file = args.output_file
+    if args.output_csv_file is None:
+        args.output_csv_file = default_output_csv_file(args.output_label_file)
+
+
 def label_samples(args):
     set_openai_key_from_config()
     os.makedirs(args.output_dir, exist_ok=True)
-    if args.output_file and args.output_label_file == parser_default_output_label_file():
-        args.output_label_file = args.output_file
+    resolve_output_paths(args)
     archive_existing_outputs(args)
     skip_ids = {item.strip() for item in args.skip_ids.split(",") if item.strip()}
     if args.target_count <= 0:
-        print(f"No labels requested. Output file would be {args.output_label_file}")
+        print(f"No labels requested. Output files would be {args.output_label_file} and {args.output_csv_file}")
         return
 
     if args.resume:
         clean_existing_label_file(args)
+    sync_csv_from_label_file(args)
     existing_labels, _, _ = unique_usable_labels(args.output_label_file)
     seen_ids = {row["id"] for row in existing_labels} if args.resume else set()
     skipped_ids = load_skipped_ids(args.skipped_ids_file) if args.resume and not args.retry_skipped else set()
@@ -478,7 +561,7 @@ def label_samples(args):
     if args.start_index:
         sample_indices = sample_indices[args.start_index:]
 
-    configs = config_grid()
+    configs = config_grid(args.max_length_values, args.top_k_values)
     navigators = {}
 
     initial_count = len(existing_labels) if args.resume else 0
@@ -524,6 +607,7 @@ def label_samples(args):
                     "timestamp": timestamp(),
                     "output_paths": {
                         "output_label_file": args.output_label_file,
+                        "output_csv_file": args.output_csv_file,
                         "runtime_error_file": args.runtime_error_file,
                         "skipped_ids_file": args.skipped_ids_file,
                     },
@@ -569,7 +653,7 @@ def label_samples(args):
             "label": label,
             "attempts": attempts,
         }
-        append_jsonl(args.output_label_file, record)
+        append_label_outputs(args, record)
         seen_ids.add(sample_id)
         usable_count += 1
         pbar.update(1)
@@ -577,6 +661,7 @@ def label_samples(args):
     pbar.close()
     added_count = usable_count - initial_count
     print(f"Saved {added_count} new usable labels to {args.output_label_file}")
+    print(f"Synced CSV labels to {args.output_csv_file}")
     if usable_count < args.target_count:
         print(f"Only reached {usable_count} usable labels before stopping.")
     validate_outputs(args)
@@ -593,7 +678,7 @@ def parse_args():
     parser.add_argument(
         "--benchmark",
         "-d",
-        choices=["RoG-webqsp", "RoG-cwq", "CL-LT-KGQA"],
+        choices=["RoG-webqsp", "RoG-cwq", "CR-LT-KGQA"],
         default="RoG-webqsp",
     )
     parser.add_argument("--num_samples", "--sample", type=int, default=10)
@@ -607,13 +692,17 @@ def parse_args():
     parser.add_argument("--output_dir", type=str, default="router_labels")
     parser.add_argument("--output_file", type=str, default=None)
     parser.add_argument("--output_label_file", type=str, default=parser_default_output_label_file())
+    parser.add_argument("--output_csv_file", type=str, default=None)
     parser.add_argument("--runtime_error_file", type=str, default=os.path.join("router_labels", "RoG-webqsp_train_router_runtime_errors.jsonl"))
     parser.add_argument("--skipped_ids_file", type=str, default=os.path.join("router_labels", "RoG-webqsp_train_router_skipped_ids.jsonl"))
     parser.add_argument("--model_name", type=str, default="gpt-3.5-turbo-0125")
     parser.add_argument("--embedding_model", type=str, default="text-embedding-3-small")
     parser.add_argument("--top_n", type=int, default=30)
+    parser.add_argument("--top_k_values", type=parse_csv_ints, default=TOP_KS)
+    parser.add_argument("--max_length_values", type=parse_csv_ints, default=MAX_LENGTHS)
     parser.add_argument("--strategy", type=str, default="discrete_rating")
     parser.add_argument("--verifier", type=str, default="deductive+planning")
+    parser.add_argument("--disable_termination_verification", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--alpha", type=float, default=0.3)
     parser.add_argument("--add_hop_information", action="store_true")
     parser.add_argument("--N_CPUS", type=int, default=1)

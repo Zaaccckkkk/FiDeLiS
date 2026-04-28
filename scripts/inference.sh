@@ -4,7 +4,7 @@ export HF_HOME=${SOURCE_PATH}/.cache/huggingface
 # MODEL_NAME="gpt-4-0125-preview"
 MODEL_NAME_LIST="gpt-3.5-turbo-0125 gpt-4-turbo"
 EMBEDDING_MODEL="text-embedding-3-small"
-DATASET_LIST="RoG-webqsp RoG-cwq CL-LT-KGQA"
+DATASET_LIST="RoG-webqsp RoG-cwq CR-LT-KGQA"
 
 tmux new-session -d -s mySession
 

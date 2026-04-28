@@ -1,4 +1,6 @@
 .vscode/
+.venv/
+cache/
 datasets/joint_training
 datasets/AlignData
 logs/
@@ -6,6 +8,7 @@ ref_examples/
 results/
 results_final_test/
 results_grid*/
+results_gird/
 router_labels/
 results/gen_rule_path/
 results/KGQA/

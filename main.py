@@ -128,7 +128,7 @@ def data_processing(args):
          num_proc=args.N_CPUS,
       )
    
-   elif args.d == "CL-LT-KGQA":   
+   elif args.d == "CR-LT-KGQA":   
       input_file = args.crlt_path if os.path.exists(args.crlt_path) else os.path.join(args.d)
       output_file = os.path.join(args.save_cache, f"{args.d}_processed")
       if os.path.exists(args.crlt_path):
@@ -293,7 +293,7 @@ if __name__ == "__main__":
    parser.add_argument("--seed", type=int, default=42)
    parser.add_argument("--data_path", type=str, default="rmanluo")
    parser.add_argument("--crlt_path", type=str, default=os.path.join("datasets", "crlt", "CR-LT-QA.json"))
-   parser.add_argument("--d", "-d", type=str, choices=["RoG-webqsp", "RoG-cwq", "CL-LT-KGQA"], default="RoG-webqsp")
+   parser.add_argument("--d", "-d", type=str, choices=["RoG-webqsp", "RoG-cwq", "CR-LT-KGQA"], default="RoG-webqsp")
    parser.add_argument("--save_cache", type=str, default=os.path.join("datasets", "cache"))
    parser.add_argument("--split", type=str, default="test")
    parser.add_argument("--output_path", type=str, default="results")
@@ -304,6 +304,7 @@ if __name__ == "__main__":
    parser.add_argument("--strategy", type=str, default="discrete_rating")
    parser.add_argument("--squeeze", type=bool, default=True)
    parser.add_argument("--verifier", type=str, default="deductive+planning")
+   parser.add_argument("--disable_termination_verification", action=argparse.BooleanOptionalAction, default=True)
    parser.add_argument("--embedding_model", type=str, default="text-embedding-3-small")
    parser.add_argument("--add_hop_information", action="store_true")
    parser.add_argument("--generate_embeddings", action="store_true")

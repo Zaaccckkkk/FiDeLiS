@@ -133,10 +133,10 @@ def check_datasets():
     with crlt_path.open("r", encoding="utf-8") as f:
         crlt = json.load(f)
     keys = sorted(crlt[0].keys()) if crlt else []
-    print(f"CL-LT-KGQA local: size={len(crlt)} keys={keys}", flush=True)
+    print(f"CR-LT-KGQA local: size={len(crlt)} keys={keys}", flush=True)
     if crlt:
-        print_first_question("CL-LT-KGQA", crlt[0])
-    status["CL-LT-KGQA"] = "OK"
+        print_first_question("CR-LT-KGQA", crlt[0])
+    status["CR-LT-KGQA"] = "OK"
     return status
 
 
@@ -254,7 +254,7 @@ def dataset_command(dataset_name, sample_size, top_n, top_k, max_length, runner)
 def run_inference_suite(sample_size, top_n, top_k, max_length, runner, preprocessing_status, eval_status):
     print_section(f"Inference Smoke Tests sample={sample_size}")
     rows = []
-    for dataset_name in ["CL-LT-KGQA", "RoG-webqsp", "RoG-cwq"]:
+    for dataset_name in ["CR-LT-KGQA", "RoG-webqsp", "RoG-cwq"]:
         command = dataset_command(dataset_name, sample_size, top_n, top_k, max_length, runner)
         row = {
             "dataset": dataset_name,

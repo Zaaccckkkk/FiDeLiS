@@ -1,0 +1,309 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
+
+\lstdefinestyle{prompt}{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  rulecolor=\color{black!25},
+  framerule=0.4pt,
+  xleftmargin=0.5em,
+  xrightmargin=0.5em
+}
+
+\title{FiDeLiS LLM Prompt Steps}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Prompt Assembly}
+
+All chat-completion prompts in the main pipeline are assembled by
+\texttt{src/utils/llm\_backbone.py::LLM\_Backbone.get\_completion} as:
+
+\begin{lstlisting}[style=prompt]
+[
+  {"role": "system", "content": prompt["system"]},
+  *prompt["examples"],
+  {"role": "user", "content": prompt["prompt"]}
+]
+\end{lstlisting}
+
+The actual prompt templates live in \texttt{src/prompts/webqsp.py},
+\texttt{src/prompts/cwq.py}, and \texttt{src/prompts/cl\_lt\_kgqa.py}.
+\texttt{RoG-webqsp} uses \texttt{webqsp.py}; \texttt{RoG-cwq} uses
+\texttt{cwq.py}; \texttt{CR-LT-KGQA} uses \texttt{cl\_lt\_kgqa.py}.
+
+\section{Main FiDeLiS Pipeline}
+
+\subsection{Step 1: Planning and Keyword Generation}
+
+\textbf{Call site:} \texttt{src/llm\_navigator.py::LLM\_Navigator.planning}
+
+\textbf{When used:} Once per starting entity, before beam search. The LLM returns
+JSON containing \texttt{keywords}, \texttt{planning\_steps}, and
+\texttt{declarative\_statement}. The generated \texttt{keywords} are later sent
+to the embedding API for Path-RAG retrieval.
+
+\textbf{System prompt:}
+\begin{lstlisting}[style=prompt]
+You are a helpful assistant designed to output JSON that aids in navigating a knowledge graph to answer a provided question. The response should include the following keys: (1) 'keywords': an exhaustive list of keywords or relation names that you would use to find the reasoning path from the knowledge graph to answer the question. Aim for maximum coverage to ensure no potential reasoning paths will be overlooked; (2) 'planning_steps': a list of detailed steps required to trace the reasoning path with. Each step should be a string instead of a dict. (3) 'declarative_statement': a string of declarative statement that can be transformed from the given query, For example, convert the question 'What do Jamaican people speak?' into the statement 'Jamaican people speak *placeholder*.' leave the *placeholder* unchanged; Ensure the JSON object clearly separates these components.
+\end{lstlisting}
+
+\textbf{User prompt template:}
+\begin{lstlisting}[style=prompt]
+{question}?
+\end{lstlisting}
+
+\subsection{Step 2: Path-RAG Embedding Retrieval}
+
+\textbf{Call site:} \texttt{src/path\_rag.py::Path\_RAG.get\_path}
+
+\textbf{When used:} During each beam-search expansion, after planning. This is
+an LLM API call to the embedding model, not a chat prompt. The input is the
+planning output \texttt{keywords}.
+
+\textbf{Embedding input template:}
+\begin{lstlisting}[style=prompt]
+{key_words}
+\end{lstlisting}
+
+\subsection{Step 3: Reasoning-Path Parsing}
+
+\textbf{Call site:} \texttt{src/llm\_navigator.py::LLM\_Navigator.rpth\_parser}
+
+\textbf{When used:} Inside deductive termination when
+\texttt{--verifier deductive+planning}. It reformulates a KG path into a natural
+language statement before the deductive verifier runs.
+
+\textbf{System prompt:}
+\begin{lstlisting}[style=prompt]
+You are asked to transfer the reasoning path to a statment, for example, convet the reasoning path 'Henri Matisse->book.written_work.subjects->Matisse, Picasso' to 'Henri Matisse wrote a book about Matisse and Picasso'.
+\end{lstlisting}
+
+\textbf{User prompt template:}
+\begin{lstlisting}[style=prompt]
+{reasoning_path}
+\end{lstlisting}
+
+\subsection{Step 4A: Termination Verification, Sufficiency Mode}
+
+\textbf{Call site:} \texttt{src/llm\_navigator.py::LLM\_Navigator.deductive\_termination}
+
+\textbf{When used:} At nonzero beam-search depths when \texttt{--verifier enough}.
+The LLM decides whether the current reasoning path is already sufficient.
+
+\textbf{System prompt:}
+\begin{lstlisting}[style=prompt]
+Given a question and the starting entity from a knowledge graph, you are asked to answer whether it's sufficient for you to answer the question with the following reasoning path. For each reasoning path, respond with 'Yes' if it is sufficient, and 'No' if it is not. Your response should be either 'Yes' or 'No', corresponding to reasoning path.
+\end{lstlisting}
+
+\textbf{User prompt template:}
+\begin{lstlisting}[style=prompt]
+Considering the planning context {plan_context} and the given question {question}, you are asked to answer whether it's sufficient for you to answer the question with the following reasoning path. {reasoning_path}. Verify if it is sufficient to answer the question with each of the provided reasoning path. Your response should either 'Yes' or 'No', corresponding to reasoning path. 
+Answer:
+\end{lstlisting}
+
+\subsection{Step 4B: Termination Verification, Deductive Planning Mode}
+
+\textbf{Call site:} \texttt{src/llm\_navigator.py::LLM\_Navigator.deductive\_termination}
+
+\textbf{When used:} At nonzero beam-search depths when
+\texttt{--verifier deductive+planning}. The current path is first parsed by Step
+3. Then the LLM checks whether the question-derived declarative statement can be
+deduced from the parsed path.
+
+\textbf{System prompt:}
+\begin{lstlisting}[style=prompt]
+You are asked to verify whether the reasoning step follows deductively from the question and the current reasoning path in a deductive manner. If yes return yes, if no, return no
+\end{lstlisting}
+
+\textbf{User prompt template:}
+\begin{lstlisting}[style=prompt]
+Whether the conclusion '{declarative_statement}' can be deduced from '{parsed_reasoning_path}', if yes, return yes, if no, return no.
+\end{lstlisting}
+
+\textbf{Runtime detail:} Before this prompt is formatted, the code replaces
+\texttt{*placeholder*} in the planning output \texttt{declarative\_statement}
+with the final entity in the current reasoning path.
+
+\subsection{Step 5: Beam Candidate Selection}
+
+\textbf{Call site:} \texttt{src/llm\_navigator.py::LLM\_Navigator.decide\_top\_k\_candidates}
+
+\textbf{When used:} At each beam-search expansion except the final depth. The LLM
+chooses the most promising next reasoning paths from Path-RAG candidates.
+
+\textbf{System prompt:}
+\begin{lstlisting}[style=prompt]
+Given a question and the starting entity from a knowledge graph, you are asked to retrieve reasoning paths from the given reasoning paths that are useful for answering the question.
+\end{lstlisting}
+
+\textbf{User prompt template:}
+\begin{lstlisting}[style=prompt]
+Considering the planning context {plan_context} and the given question {question}, 
+you are asked to choose the best {beam_width} reasoning paths from the following candidates with the highest probability to lead to a useful reasoning path for answering the question. {reasoning_paths}. 
+
+Only return the index of the {beam_width} selected reasoning paths in a list.
+\end{lstlisting}
+
+\textbf{Runtime detail:} \texttt{reasoning\_paths} is formatted as a numbered
+list:
+
+\begin{lstlisting}[style=prompt]
+1: {candidate_path_1}
+2: {candidate_path_2}
+...
+\end{lstlisting}
+
+\textbf{Highlighted output correspondence:} this step helps determine
+\texttt{prediction\_direct\_answer}. The direct-answer field is not generated by
+a final answer prompt. After beam search chooses/stops on reasoning path(s), the
+code extracts the last entity in each selected path:
+
+\begin{lstlisting}[style=prompt]
+prediction_direct_answer = last entity of each selected reasoning path
+\end{lstlisting}
+
+In code, this is implemented as
+\texttt{item[0].split(" -> ")[-1]} in
+\texttt{src/llm\_navigator.py::LLM\_Navigator.beam\_search}.
+
+\subsection{Step 6: Final Reasoning / Answer Generation}
+
+\textbf{Call site:} \texttt{src/llm\_navigator.py::LLM\_Navigator.reasoning}
+
+\textbf{When used:} After beam search finishes. This is the final reasoning step
+that turns the retrieved reasoning path(s) into the answer.
+
+\textbf{Highlighted output correspondence:} this step produces
+\texttt{prediction\_llm}. The LLM response from this prompt is split on
+\texttt{", "} and saved as \texttt{prediction\_llm}.
+
+\textbf{System prompt for \texttt{RoG-webqsp} and \texttt{RoG-cwq}:}
+\begin{lstlisting}[style=prompt]
+Given a question and the associated retrieved reasoning path from a knowledge graph, you are asked to answer the following question based only on the reasoning path. Only return the answer to the question, or NotKnown if the reasoning path is insufficient.
+\end{lstlisting}
+
+\textbf{System prompt for \texttt{CR-LT-KGQA}:}
+\begin{lstlisting}[style=prompt]
+Given a question and the associated retrieved reasoning path from a knowledge graph, you are asked to verify whether the question is supported by the reasoning path. Only return True, False, or NotKnown.
+\end{lstlisting}
+
+\textbf{User prompt template for \texttt{RoG-webqsp} and \texttt{RoG-cwq}:}
+\begin{lstlisting}[style=prompt]
+Given a question and the associated retrieved reasoning path from a knowledge graph,
+answer the question using only the information explicitly supported by the reasoning path.
+
+Question: {question}
+Reasoning path: {reasoning_path}
+
+Rules:
+1. Use only the entities and relations in the reasoning path.
+2. Do not use outside knowledge.
+3. If the reasoning path does not contain enough information to answer, return "NotKnown".
+4. Only return the final answer.
+\end{lstlisting}
+
+\textbf{User prompt template for \texttt{CR-LT-KGQA}:}
+\begin{lstlisting}[style=prompt]
+Given a question and the associated retrieved reasoning path from a knowledge graph,
+verify whether the question is supported by the reasoning path.
+
+Question: {question}
+Reasoning path: {reasoning_path}
+
+Rules:
+1. Return True only if the reasoning path explicitly supports the statement.
+2. Return False if the reasoning path contradicts the statement.
+3. If the reasoning path is insufficient, return NotKnown.
+4. Do not use outside knowledge.
+5. Only return True, False, or NotKnown.
+\end{lstlisting}
+
+\section{Few-Shot Examples Included in Chat Prompts}
+
+The following prompt dictionaries include nonempty \texttt{examples}, so these
+messages are inserted between the system prompt and user prompt:
+
+\begin{itemize}
+  \item \texttt{beam\_search\_prompt}: \texttt{webqsp.py}, \texttt{cwq.py}, and \texttt{cl\_lt\_kgqa.py}.
+  \item \texttt{terminals\_prune\_single\_prompt}: \texttt{webqsp.py} only.
+\end{itemize}
+
+The current \texttt{reasoning\_prompt} examples are empty in all three prompt
+modules, so the final \texttt{prediction\_llm} answer is produced without
+few-shot examples.
+
+In \texttt{cwq.py} and \texttt{cl\_lt\_kgqa.py},
+\texttt{terminals\_prune\_single\_prompt} defines \texttt{examples} twice; Python
+keeps the second value, so the executed prompt has \texttt{examples = []}.
+
+\section{Router Label Generation}
+
+\textbf{Call site:} \texttt{scripts/label\_router\_configs.py}
+
+The router-label script does not define additional LLM prompt templates. It
+constructs an \texttt{LLM\_Navigator} for each \texttt{max\_length/top\_k}
+configuration and calls \texttt{beam\_search}, so it reuses Steps 1--6 above.
+
+\section{Legacy Sandbox Pipeline}
+
+\textbf{Call site:} \texttt{src/sandbox/mcq\_sandbox.py}
+
+The sandbox implements an older pipeline. Its discrete-rating path mirrors the
+main prompts for planning, beam selection, sufficiency termination, and final
+reasoning. Its continuous-rating path attempts two additional batched LLM
+scoring prompts:
+
+\subsection{Sandbox Continuous Rating: Deductive Score}
+
+\textbf{Call site:} \texttt{src/sandbox/mcq\_sandbox.py::prepare\_options\_for\_each\_step}
+
+\textbf{Prompt dictionary used:} \texttt{prompt\_list.deductive\_verifier\_prompt}
+
+\textbf{Formatted with these runtime fields:}
+\begin{lstlisting}[style=prompt]
+question={query}
+reasoning_path={reasoning_path if reasoning_path else starting_node}
+reasoning_step={candidate}
+\end{lstlisting}
+
+\textbf{Important note:} In the current repo, the available
+\texttt{deductive\_verifier\_prompt} template expects
+\texttt{\{declarative\_statement\}} and \texttt{\{parsed\_reasoning\_path\}},
+not the fields above. As written, this sandbox path is inconsistent with the
+current prompt modules.
+
+\subsection{Sandbox Continuous Rating: Self-Confidence Score}
+
+\textbf{Call site:} \texttt{src/sandbox/mcq\_sandbox.py::prepare\_options\_for\_each\_step}
+
+\textbf{Prompt dictionary referenced:} \texttt{prompt\_list.self\_confidence\_prompt}
+
+\textbf{Formatted with these runtime fields:}
+\begin{lstlisting}[style=prompt]
+question={query}
+reasoning_path={reasoning_path + "->" + candidate if reasoning_path else starting_node + "->" + candidate}
+\end{lstlisting}
+
+\textbf{Important note:} No \texttt{self\_confidence\_prompt} is defined in
+\texttt{src/prompts/webqsp.py}, \texttt{src/prompts/cwq.py}, or
+\texttt{src/prompts/cl\_lt\_kgqa.py}. Therefore the current sandbox
+continuous-rating path references a missing prompt template.
+
+\section{Configured But Unimplemented Verifier Modes}
+
+In \texttt{src/llm\_navigator.py::deductive\_termination}, the verifier modes
+\texttt{enough+planning} and \texttt{enough+planning+confidence} are present as
+\texttt{pass} branches. They do not currently define or send an LLM prompt.
+
+\end{document}
