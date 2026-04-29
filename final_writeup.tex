@@ -1,0 +1,62 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\title{FiDeLiS Faithfulness Improvements}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Intro}
+
+\paragraph{Definition of Faithful.}
+The final answer is genuinely supported by the knowledge graph evidence and the model's reasoning path, rather than being guessed or hallucinated by the LLM.
+
+\paragraph{The pipeline of the FiDeLiS}
+
+\paragraph{The benchmarks}
+
+\paragraph{Our goal}
+
+\section{Improvement}
+
+\subsection{More Faithful Prompt}
+
+\paragraph{Problem.}
+The original Final Reasoning prompt says to ``answer the following question based on the reasoning path and your knowledge.'' This wording allows the LLM to rely on outside knowledge or memorized facts, even when the retrieved reasoning path does not support the answer. As a result, the final answer may be correct by chance but not faithful to the knowledge graph evidence.
+
+\paragraph{Solution.}
+Remove ``and your knowledge'' from the Final Reasoning prompt and instruct the LLM to answer using only the retrieved reasoning path. The revised prompt makes the reasoning path the only source of entity-specific evidence.
+
+\paragraph{Effect.}
+The LLM more strictly follows the retrieved reasoning paths, reducing hallucinated answers and improving faithfulness between the knowledge graph evidence and the final prediction.
+
+\subsection{Change the Answering Structure}
+
+\paragraph{Problem.}
+The CR-LT dataset only has gold answers in True/False form. If the LLM is forced to answer only True or False, it can randomly guess one of the two labels as a shortcut, even when the retrieved reasoning path is insufficient.
+
+\paragraph{Solution.}
+Allow the LLM to answer with three possible labels: True, False, or NotKnown. True and False are used only when the retrieved reasoning path provides enough evidence to support or contradict the question. NotKnown is used when the path does not contain enough entity-specific facts.
+
+\paragraph{Effect.}
+This reduces random guessing on CR-LT and makes unsupported cases explicit. The model is encouraged to distinguish between evidence-based verification and missing evidence, improving the reliability of CR-LT evaluation.
+
+\subsection{Remove the Termination Verification Step}
+
+\paragraph{Problem.}
+There is large variability between different runs of the project given the same depth and width setting. This variability comes from the Termination Verification step: in some runs, it stops the reasoning or beam search too early, preventing the model from exploring useful paths that would otherwise be retrieved.
+
+\paragraph{Solution.}
+Remove the Termination Verification step entirely. Beam search proceeds according to the configured depth and width rather than relying on an additional LLM-based early-stop decision.
+
+\paragraph{Effect.}
+Performance becomes more consistent under the same depth and width setting. The pipeline also makes fewer API calls, and the price decreases by approximately 30\%. Although removing termination verification can allow the search to go deeper along the tree, eliminating the repeated verification calls still saves a substantial number of API calls overall.
+
+\end{document}

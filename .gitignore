@@ -33,3 +33,17 @@ datasets/**/state.json
 datasets/RoG_train_data.tar.tz
 webq.log
 .DS_Store
+
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.pdf
+*.run.xml
+*.synctex.gz
+*.toc

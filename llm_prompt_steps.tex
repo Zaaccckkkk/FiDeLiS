@@ -195,7 +195,26 @@ Given a question and the associated retrieved reasoning path from a knowledge gr
 
 \textbf{System prompt for \texttt{CR-LT-KGQA}:}
 \begin{lstlisting}[style=prompt]
-Given a question and the associated retrieved reasoning path from a knowledge graph, you are asked to verify whether the question is supported by the reasoning path. Only return True, False, or NotKnown.
+You are a strict KG-grounded commonsense verifier.
+
+You must verify the question using the retrieved KG triples / reasoning path(s) as the factual grounding.
+
+The retrieved KG triples / path(s) are the only allowed source for entity-specific facts.
+You may use limited general commonsense or basic domain knowledge only in the final verification step, after the required entity-specific facts have been grounded by the retrieved KG triples / path(s).
+
+Return:
+- True, if the retrieved KG triples / path(s), together with a valid final-step commonsense bridge, support the question.
+- False, if the retrieved KG triples / path(s), together with a valid final-step commonsense bridge, contradict the question.
+- NotKnown, if the retrieved KG triples / path(s) do not provide enough entity-specific facts, or if the answer would require unstated entity-specific knowledge.
+
+Important rules:
+1. All entity-specific facts must come from the retrieved KG triples / path(s).
+2. Earlier reasoning steps must strictly follow the retrieved KG triples / path(s).
+3. Commonsense or basic domain knowledge may be used only as the final bridge from grounded facts to the answer.
+4. Do not use commonsense to invent missing KG facts, relations, dates, locations, languages, professions, biological properties, or historical details about a specific entity.
+5. If the retrieved path does not contain the key entity type, relation, attribute, or comparison target needed for the question, return NotKnown.
+6. Do not explain your answer.
+7. Only return True, False, or NotKnown.
 \end{lstlisting}
 
 \textbf{User prompt template for \texttt{RoG-webqsp} and \texttt{RoG-cwq}:}
@@ -215,18 +234,26 @@ Rules:
 
 \textbf{User prompt template for \texttt{CR-LT-KGQA}:}
 \begin{lstlisting}[style=prompt]
-Given a question and the associated retrieved reasoning path from a knowledge graph,
-verify whether the question is supported by the reasoning path.
+Question:
+{question}
 
-Question: {question}
-Reasoning path: {reasoning_path}
+Retrieved KG triples / reasoning path(s):
+{reasoning_path}
 
-Rules:
-1. Return True only if the reasoning path explicitly supports the statement.
-2. Return False if the reasoning path contradicts the statement.
-3. If the reasoning path is insufficient, return NotKnown.
-4. Do not use outside knowledge.
-5. Only return True, False, or NotKnown.
+Task:
+Verify the question using only the retrieved KG triples / reasoning path(s) for entity-specific facts. 
+You may use limited general commonsense or basic domain knowledge only for the final step of deciding whether the grounded facts support or contradict the question.
+
+Decision rules:
+- Return True if the retrieved path grounds the necessary entity-specific facts and a reasonable final-step commonsense bridge supports the question.
+- Return False if the retrieved path grounds the necessary entity-specific facts and a reasonable final-step commonsense bridge contradicts the question.
+- Return NotKnown if the retrieved path is missing the necessary entity-specific facts.
+- Return NotKnown if the answer would require outside knowledge about a specific entity.
+- Do not use commonsense to add missing relations or attributes to the path.
+- Do not explain your answer.
+
+Output format:
+Only return True, False, or NotKnown.
 \end{lstlisting}
 
 \section{Few-Shot Examples Included in Chat Prompts}
