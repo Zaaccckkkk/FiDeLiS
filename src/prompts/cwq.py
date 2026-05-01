@@ -1,18 +1,7 @@
 reasoning_prompt = {
-   "system": "Given a question and the associated retrieved reasoning path from a knowledge graph, you are asked to answer the following question based on the reasoning path and your knowledge. Only return the answer to the question.",
-   "examples": [
-      {"role": "user", "content": "Question: what art movements was henri matisse involved in? \nReasoning path: Henri Matisse->visual_art.visual_artist.associated_periods_or_movements->Neo-impressionism"}, 
-      {"role": "assistant", "content": "Answer: Neo-impressionism"},
-      {"role": "user", "content": "Question: what team did tim tebow play for in college\n Reasoning path: Tim Tebow->sports.sports_team_roster.player->m.0hpc6gc->sports.sports_team_roster.team->Florida Gators football"},
-      {"role": "assistant", "content": "Answer: Florida Gators football"},
-      {"role": "user", "content": "Question: who won 2012 presidential election in france?\nReasoning path: French presidential election, 2012->government.election.winner->Fran\u00e7ois Hollande"},
-      {"role": "assistant", "content": "Answer: Fran\u00e7ois Hollande"},
-      {"role": "user", "content": "Question: what is the name of the person who wrote the book that was made into the movie that won the Academy Award for Best Picture in 2014?\nReasoning path: Academy Award for Best Picture, 2014->film.film.film_award_wins->12 Years a Slave->film.film.written_by->John Ridley"},
-      {"role": "assistant", "content": "Answer: John Ridley"},
-      {"role": "user", "content": "Question: where does selena gomez live right now 2010?\nReasoning Path: Selena Gomez->people.person.places_lived->m.04hmnxs->people.place_lived.location->New York City"},
-      {"role": "assistant", "content": "Answer: New York City"}
-   ],
-   "prompt": "Given a question and the associated retrieved reasoning path from a knowledge graph, you are asked to answer the following question based on the reasoning path and your knowledge. \nQuestion: {question} \nReasoning path: {reasoning_path} \nOnly return the answer to the question."
+   "system": "You are a strict knowledge-graph reasoning answerer.\n\nYou must answer the question using ONLY the provided retrieved reasoning path(s). Do not use any outside knowledge, common sense, or memorized facts.\n\nA valid answer must be explicitly supported by the reasoning path(s). This means the answer entity or value must appear in the path, and the path must contain the relation chain needed to answer the question.\n\nIf multiple answers are supported by the reasoning paths, return all of them. Do not omit supported answers.\n\nIf the reasoning path(s) do not contain enough information to answer the question, return NotKnown.\n\nImportant rules:\n1. Do not infer missing facts from your own knowledge.\n2. Do not complete an incomplete path.\n3. Do not explain your reasoning.\n4. Do not write a full sentence.\n5. Return only the answer to the question, or NotKnown if the reasoning path is insufficient.",
+   "examples": [],
+   "prompt": "Question:\n{question}\n\nRetrieved reasoning path(s):\n{reasoning_path}\n\nTask:\nAnswer the question using only the retrieved reasoning path(s).\n\nDecision rules:\n- If the path(s) explicitly support one answer, return that answer.\n- If the path(s) explicitly support multiple answers, return all supported answers, one per line.\n- If the path(s) stop before reaching the information requested by the question, return NotKnown.\n- If the answer would require outside knowledge not present in the path(s), return NotKnown.\n- If a time, date, or qualifier appears in the question but the path(s) provide relevant answer entities without contradicting that qualifier, do not reject the path solely because the qualifier is not repeated.\n- Do not add explanations, prefixes, or complete sentences.\n\nOutput format:\nOnly return the answer to the question, or NotKnown if the reasoning path is insufficient."
 }
 
 beam_search_prompt = {

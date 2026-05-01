@@ -148,6 +148,8 @@ def build_command(args, dataset, top_k, max_length, python_cmd):
         command += ["--split", args.split]
     if args.add_hop_information:
         command.append("--add_hop_information")
+    if not args.disable_termination_verification:
+        command.append("--no-disable_termination_verification")
     if args.debug:
         command.append("--debug")
     return command
@@ -163,6 +165,7 @@ def write_run_config(run_dir, args, dataset, top_k, max_length, command):
         "top_n": args.top_n,
         "top_k": top_k,
         "max_length": max_length,
+        "disable_termination_verification": args.disable_termination_verification,
         "split": args.split if dataset in {"RoG-webqsp", "RoG-cwq"} else None,
         "command": command,
     }
@@ -180,9 +183,10 @@ def main():
     parser.add_argument("--top_n", type=int, default=30)
     parser.add_argument("--top_k_values", type=str, default="1,2,3")
     parser.add_argument("--max_length_values", type=str, default="1,2,3")
-    parser.add_argument("--datasets", type=str, default="CL-LT-KGQA,RoG-webqsp,RoG-cwq")
+    parser.add_argument("--datasets", type=str, default="CR-LT-KGQA,RoG-webqsp,RoG-cwq")
     parser.add_argument("--split", type=str, default="test")
     parser.add_argument("--add_hop_information", type=parse_bool, default=True)
+    parser.add_argument("--disable_termination_verification", type=parse_bool, default=True)
     parser.add_argument("--debug", type=parse_bool, default=True)
     parser.add_argument("--dry_run", action="store_true")
     parser.add_argument("--resume", action="store_true")

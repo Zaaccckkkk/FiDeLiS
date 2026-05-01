@@ -20,7 +20,7 @@ def load_ids(path):
 
 def select_ids(seed, sample_size):
     args = SimpleNamespace(
-        d="CL-LT-KGQA",
+        d="CR-LT-KGQA",
         crlt_path=str(REPO_ROOT / "datasets" / "crlt" / "CR-LT-QA.json"),
         sample=sample_size,
         seed=seed,

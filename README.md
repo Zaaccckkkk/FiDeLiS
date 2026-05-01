@@ -51,7 +51,7 @@ python main.py --d RoG-webqsp --model_name gpt-3.5-turbo-0125
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `--d` | Dataset choice (RoG-webqsp, RoG-cwq, or CL-LT-KGQA) | RoG-webqsp |
+| `--d` | Dataset choice (RoG-webqsp, RoG-cwq, or CR-LT-KGQA) | RoG-webqsp |
 | `--model_name` | LLM model to use | gpt-3.5-turbo-0125 |
 | `--top_n` | Number of top candidates to consider | 30 |
 | `--top_k` | Beam size for search | 3 |
@@ -126,7 +126,7 @@ py scripts/final_smoke_test.py --run_three_sample
 Start with a tiny grid before spending money on a larger run:
 
 ```powershell
-py scripts/run_eval_pipeline.py --sample_size 3 --datasets CL-LT-KGQA --top_k_values 1,2 --max_length_values 1,2 --output_path results_grid_test --resume
+py scripts/run_eval_pipeline.py --sample_size 3 --datasets CR-LT-KGQA --top_k_values 1,2 --max_length_values 1,2 --output_path results_grid_test --resume
 ```
 
 ### Full Grid

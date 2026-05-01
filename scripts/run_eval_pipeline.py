@@ -45,7 +45,8 @@ def main():
     parser.add_argument("--top_n", type=int, default=30)
     parser.add_argument("--top_k_values", type=str, default="1,2,3")
     parser.add_argument("--max_length_values", type=str, default="1,2,3")
-    parser.add_argument("--datasets", type=str, default="CL-LT-KGQA,RoG-webqsp,RoG-cwq")
+    parser.add_argument("--datasets", type=str, default="CR-LT-KGQA,RoG-webqsp,RoG-cwq")
+    parser.add_argument("--disable_termination_verification", type=str, default="true")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--dry_run", action="store_true")
     parser.add_argument("--skip_smoke_test", action="store_true")
@@ -82,6 +83,8 @@ def main():
         args.max_length_values,
         "--datasets",
         args.datasets,
+        "--disable_termination_verification",
+        args.disable_termination_verification,
     ]
     if args.resume:
         grid_command.append("--resume")

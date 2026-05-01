@@ -39,7 +39,7 @@ class LLM_Navigator():
          self.prompt_list = prompt_webqsp
       elif args.d == "RoG-cwq":
          self.prompt_list = prompt_cwq
-      if args.d == "CL-LT-KGQA":
+      if args.d == "CR-LT-KGQA":
          self.prompt_list = prompt_cl_lt_kgqa
       self._new_line_char = "\n" # for formatting the prompt
       
@@ -295,7 +295,7 @@ class LLM_Navigator():
                llm_states["rpth"] = rpth[0]
             
                # if meet the condition, skip the current step
-               if step != 0:
+               if step != 0 and not getattr(self.args, "disable_termination_verification", True):
                   flag = self.deductive_termination(
                      state=llm_states
                   )

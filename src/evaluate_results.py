@@ -115,7 +115,7 @@ def eval_result(predict_file, cal_f1=True, topk = -1):
                                 'acc': acc, 
                                 'hit': hit, 
                                 'f1': f1_score, 
-                                'precission': precision_score, 
+                                'precision': precision_score, 
                                 'recall': recall_score
                                 }
                             ) + '\n')
