@@ -12,6 +12,29 @@ class Path_RAG():
    def __init__(self, args):
       self.llm_backbone = LLM_Backbone(args)
       self.args = args
+
+   def _policy_value(self, state: dict, key: str, default):
+      policy = state.get("policy", {})
+      return policy.get(key, getattr(self.args, key, default))
+
+   def _extract_entities_from_reasoning_path(self, reasoning_path: str) -> list:
+      if not reasoning_path:
+         return []
+      parts = [part.strip() for part in reasoning_path.split(" -> ") if part.strip()]
+      return parts[::2]
+
+   def _violates_constraints(
+      self,
+      path_entities: list,
+      neighbor: str,
+      no_immediate_backtracking: bool,
+      simple_path_only: bool,
+   ) -> bool:
+      if simple_path_only and neighbor in path_entities:
+         return True
+      if no_immediate_backtracking and len(path_entities) >= 2 and neighbor == path_entities[-2]:
+         return True
+      return False
       
    def cos_simiarlity(self, a: np.array, b: np.array):
       """
@@ -107,9 +130,85 @@ class Path_RAG():
       neighbors = [(neighbors[i].attribute, query_neighbor_similarity[i]) for i in np.argsort(query_neighbor_similarity)[::-1]]
       
       return relations, neighbors
+
+   def get_outgoing_edge_scores(
+      self,
+      entity: str,
+      graph: Graph,
+      query_embedding: list,
+   ) -> list:
+      relations, neighbors = self.get_entity_edges(entity, graph)
+      if not relations or not neighbors:
+         return []
+
+      rated_relations, rated_neighbors = self.get_relations_neighbors_set_with_ratings(
+         relations,
+         neighbors,
+         query_embedding,
+      )
+      relation_scores = {relation: score for relation, score in rated_relations}
+      neighbor_scores = {neighbor: score for neighbor, score in rated_neighbors}
+
+      edge_scores = []
+      for neighbor in graph.graph.neighbors(entity):
+         relation_obj = graph.edges[(entity, neighbor)]
+         neighbor_obj = graph.nodes[neighbor]
+         edge_scores.append(
+            (
+               relation_obj.attribute,
+               neighbor_obj.attribute,
+               relation_scores.get(relation_obj.attribute, 0.0) + neighbor_scores.get(neighbor_obj.attribute, 0.0),
+            )
+         )
+      edge_scores.sort(key=lambda item: item[2], reverse=True)
+      return edge_scores
+
+   def _best_future_score(
+      self,
+      entity: str,
+      graph: Graph,
+      query_embedding: list,
+      remaining_hops: int,
+      alpha: float,
+      path_entities: list,
+      no_immediate_backtracking: bool,
+      simple_path_only: bool,
+      branch_limit: int,
+   ) -> float:
+      if remaining_hops <= 0:
+         return 0.0
+
+      scored_edges = self.get_outgoing_edge_scores(entity, graph, query_embedding)
+      if not scored_edges:
+         return 0.0
+
+      best_score = 0.0
+      for relation, neighbor, immediate_score in scored_edges[:branch_limit]:
+         del relation
+         if self._violates_constraints(
+            path_entities=path_entities,
+            neighbor=neighbor,
+            no_immediate_backtracking=no_immediate_backtracking,
+            simple_path_only=simple_path_only,
+         ):
+            continue
+         future_score = self._best_future_score(
+            entity=neighbor,
+            graph=graph,
+            query_embedding=query_embedding,
+            remaining_hops=remaining_hops - 1,
+            alpha=alpha,
+            path_entities=path_entities + [neighbor],
+            no_immediate_backtracking=no_immediate_backtracking,
+            simple_path_only=simple_path_only,
+            branch_limit=branch_limit,
+         )
+         best_score = max(best_score, immediate_score + alpha * future_score)
+      return best_score
    
    def scoring_path(
       self,
+      state: dict,
       keyword_embeddings: list,
       rated_relations: list,
       rated_neighbors: list,
@@ -120,6 +219,20 @@ class Path_RAG():
       """
       given a list of relations and neighbors with ratings, return top-k relations and neighbors
       """
+      top_n = self._policy_value(state, "top_n", self.args.top_n)
+      alpha = float(self._policy_value(state, "alpha", self.args.alpha))
+      add_hop_information = bool(self._policy_value(state, "add_hop_information", getattr(self.args, "add_hop_information", False)))
+      lookahead_hops = int(self._policy_value(state, "lookahead_hops", getattr(self.args, "lookahead_hops", 0)))
+      no_immediate_backtracking = bool(
+         self._policy_value(state, "no_immediate_backtracking", getattr(self.args, "no_immediate_backtracking", False))
+      )
+      simple_path_only = bool(self._policy_value(state, "simple_path_only", getattr(self.args, "simple_path_only", False)))
+      branch_limit = int(self._policy_value(state, "lookahead_branch_limit", 8))
+      path_entities = self._extract_entities_from_reasoning_path(reasoning_path)
+
+      if add_hop_information and lookahead_hops <= 0:
+         lookahead_hops = 1
+
       # concatenate the relations and neighbors
       rated_paths = [] # [(path, score)]
       seen_paths = [] # store the seen paths [path, path]
@@ -132,30 +245,34 @@ class Path_RAG():
                entity=hub_node, 
                relation=relation,
                neighbor=neighbor
-            ) and new_rpth not in seen_paths:            
+            ) and new_rpth not in seen_paths:
+               if self._violates_constraints(
+                  path_entities=path_entities,
+                  neighbor=neighbor,
+                  no_immediate_backtracking=no_immediate_backtracking,
+                  simple_path_only=simple_path_only,
+               ):
+                  continue
                
-               if self.args.add_hop_information:
-                  #TODO using vectorspace to store the embeddings, otherwise the efficiency is pretty low
-                  # 1-hop neighbors = relation + neighbor
-                  one_hop_relations, one_hop_neighbors = self.get_entity_edges(neighbor, graph)
-                  
-                  if one_hop_relations and one_hop_neighbors:
-                     one_hop_rated_relations, one_hop_rated_neighbors = self.get_relations_neighbors_set_with_ratings(one_hop_relations, one_hop_neighbors, keyword_embeddings)
-                     
-                  else:
-                     # if there is no one-hop neighbors, set the score to 0
-                     one_hop_rated_relations, one_hop_rated_neighbors = [(None, 0)], [(None, 0)]
-                  
-                  # score function for path_rag
-                  rpth_score = relation_score + neighbor_score + self.args.alpha * (one_hop_rated_relations[0][1] + one_hop_rated_neighbors[0][1])
-                  
-               else:
-                  rpth_score = relation_score + neighbor_score
+               rpth_score = relation_score + neighbor_score
+               if lookahead_hops > 0:
+                  future_score = self._best_future_score(
+                     entity=neighbor,
+                     graph=graph,
+                     query_embedding=keyword_embeddings,
+                     remaining_hops=lookahead_hops,
+                     alpha=alpha,
+                     path_entities=path_entities + [neighbor],
+                     no_immediate_backtracking=no_immediate_backtracking,
+                     simple_path_only=simple_path_only,
+                     branch_limit=branch_limit,
+                  )
+                  rpth_score += alpha * future_score
                   
                rated_paths.append((new_rpth, rpth_score))
                seen_paths.append(new_rpth)
                
-      rated_paths = sorted(rated_paths, key=lambda x: x[1], reverse=True)[:self.args.top_n]
+      rated_paths = sorted(rated_paths, key=lambda x: x[1], reverse=True)[:top_n]
       
       # only return the path
       paths = [path[0] for path in rated_paths]
@@ -189,7 +306,19 @@ class Path_RAG():
          return []
                
       # top-n scoring paths
-      paths = self.scoring_path(keyword_embeddings=embeddings, reasoning_path=reasoning_path, rated_relations=rated_relations, rated_neighbors=rated_neighbors, hub_node=hub_node, graph=graph)
+      paths = self.scoring_path(
+         state=state,
+         keyword_embeddings=embeddings,
+         reasoning_path=reasoning_path,
+         rated_relations=rated_relations,
+         rated_neighbors=rated_neighbors,
+         hub_node=hub_node,
+         graph=graph,
+      )
+
+      if "search_metrics" in state:
+         state["search_metrics"]["path_rag_calls"] = state["search_metrics"].get("path_rag_calls", 0) + 1
+         state["search_metrics"]["candidate_count"] = state["search_metrics"].get("candidate_count", 0) + len(paths)
       
       return paths
 

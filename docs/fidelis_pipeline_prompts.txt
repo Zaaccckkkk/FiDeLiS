@@ -1,0 +1,886 @@
+FiDeLiS Internal Pipeline Prompts
+==================================
+
+Scope
+-----
+This file is generated from the original FiDeLiS pipeline prompt files under src/prompts/.
+It excludes the vanilla_baseline prompts added for the separate zero-shot experiment.
+
+How the pipeline sends prompts
+------------------------------
+src/utils/llm_backbone.py::LLM_Backbone.get_completion builds every chat call as:
+  1. {"role": "system", "content": prompt["system"]}
+  2. all entries in prompt["examples"]
+  3. {"role": "user", "content": prompt["prompt"]}
+The chat completion uses temperature=0 and top_p=0.
+
+Pipeline order in src/llm_navigator.py
+--------------------------------------
+1. planning(): calls plan_prompt to produce keywords, planning_steps, and declarative_statement.
+2. Path_RAG.get_path(): does not use a chat prompt; it embeds the LLM-generated keywords and ranks KG relations/neighbors by embedding similarity.
+3. deductive_termination(): for non-root paths, first calls reasoning_path_parser_prompt, then either terminals_prune_single_prompt or deductive_verifier_prompt depending on --verifier.
+   The default CLI value is --verifier deductive+planning.
+4. decide_top_k_candidates(): calls beam_search_prompt to choose beam indices from candidate paths.
+5. reasoning(): calls reasoning_prompt to produce the final answer from the selected reasoning paths.
+
+Faithfulness-relevant observation
+-------------------------------
+The final answer prompt for WebQSP/CWQ explicitly says the model should answer based on the reasoning path "and your knowledge".
+The CR-LT system message asks for True/False, but the CR-LT final user prompt still says "based on the reasoning path and your knowledge".
+Therefore, the current pipeline prompt does not force answers to be exclusively entailed by the KG path.
+
+
+====================================================================================================
+Dataset prompt module: RoG-webqsp
+Source: src/prompts/webqsp.py
+====================================================================================================
+
+----------------------------------------------------------------------------------------------------
+plan_prompt: Planning / keyword generation
+----------------------------------------------------------------------------------------------------
+SYSTEM:
+You are a helpful assistant designed to output JSON that aids in navigating a knowledge graph to answer a provided question. The response should include the following keys: (1) 'keywords': an exhaustive list of keywords or relation names that you would use to find the reasoning path from the knowledge graph to answer the question. Aim for maximum coverage to ensure no potential reasoning paths will be overlooked; (2) 'planning_steps': a list of detailed steps required to trace the reasoning path with. Each step should be a string instead of a dict. (3) 'declarative_statement': a string of declarative statement that can be transformed from the given query, For example, convert the question 'What do Jamaican people speak?' into the statement 'Jamaican people speak *placeholder*.' leave the *placeholder* unchanged; Ensure the JSON object clearly separates these components.
+
+EXAMPLES (0 messages):
+(none)
+
+USER PROMPT TEMPLATE:
+{question}?
+
+
+----------------------------------------------------------------------------------------------------
+beam_search_prompt: LLM beam candidate selection
+----------------------------------------------------------------------------------------------------
+SYSTEM:
+Given a question and the starting entity from a knowledge graph, you are asked to retrieve reasoning paths from the given reasoning paths that are useful for answering the question.
+
+EXAMPLES (2 messages):
+[1] role=user
+Question: what art movements was henri matisse involved in?
+ To proceed, the starting entity is Henri Matisse
+ Out of the following candidates for the next step, choose the best 5 with the highest probability to lead to a useful reasoning path for answering the question. 
+Candidates: 1: book.written_work.subjects
+2: exhibitions.exhibition_subject.exhibitions_created_about_this_subject
+3: influence.influence_node.peers
+4: visual_art.artwork.artist
+5: book.author.works_written
+6: influence.influence_node.influenced
+7: visual_art.art_series.artist
+8: book.book_subject.works
+9: influence.influence_node.influenced_by
+10: people.person.profession
+11: common.topic.article
+12: influence.influence_node.influenced
+13: common.topic.notable_for
+14: education.education.student
+15: influence.influence_node.influenced_by
+16: influence.influence_node.influenced
+17: influence.influence_node.influenced_by
+18: common.topic.notable_types
+19: influence.influence_node.influenced
+20: influence.influence_node.influenced_by
+21: base.patronage.patron_client_relationship.client
+22: influence.influence_node.influenced
+23: visual_art.artwork.artist
+24: education.education.student
+25: book.written_work.author
+26: visual_art.artwork.artist
+27: exhibitions.exhibition.subjects
+28: visual_art.artwork.artist
+29: book.written_work.author
+30: visual_art.visual_artist.art_forms
+31: book.book_subject.works
+32: visual_art.artwork.artist
+33: people.person.nationality
+34: visual_art.visual_art_form.artists
+35: influence.influence_node.influenced_by
+36: visual_art.artwork.artist
+37: people.person.parents
+38: visual_art.artwork.artist
+39: influence.influence_node.influenced_by
+40: visual_art.art_period_movement.associated_artists
+41: influence.influence_node.influenced_by
+42: people.person.parents
+43: base.patronage.patron_client_relationship.client
+44: exhibitions.exhibition_subject.exhibitions_created_about_this_subject
+45: exhibitions.exhibition.subjects
+46: visual_art.visual_artist.art_series
+47: visual_art.artwork.artist
+48: visual_art.visual_artist.associated_periods_or_movements
+49: influence.peer_relationship.peers
+50: exhibitions.exhibition.subjects
+51: visual_art.artwork.artist
+52: influence.influence_node.influenced
+53: influence.influence_node.influenced_by
+54: influence.influence_node.influenced
+55: influence.influence_node.influenced_by
+56: influence.influence_node.influenced_by
+57: visual_art.artwork.artist
+58: exhibitions.exhibition_subject.exhibitions_created_about_this_subject
+59: book.written_work.subjects
+60: influence.influence_node.influenced
+61: people.person.parents
+62: influence.influence_node.influenced_by
+63: influence.influence_node.peers
+64: exhibitions.exhibition.subjects
+65: base.patronage.patron_client_relationship.client
+66: film.personal_film_appearance.person
+67: influence.influence_node.influenced_by
+68: common.webpage.topic
+69: exhibitions.exhibition.subjects
+70: influence.influence_node.influenced_by
+71: common.image.appears_in_topic_gallery
+72: people.person.place_of_birth
+73: book.written_work.author
+74: film.film_character.portrayed_in_films
+75: influence.influence_node.influenced
+76: influence.influence_node.peers
+77: people.person.parents
+78: base.patronage.client.related_patron
+79: influence.influence_node.influenced
+80: influence.influence_node.influenced_by
+81: influence.influence_node.influenced_by
+82: book.written_work.subjects
+83: influence.influence_node.peers
+84: influence.influence_node.influenced
+85: symbols.namesake.named_after
+86: influence.influence_node.influenced_by
+87: visual_art.artwork.artist
+88: common.image.size
+89: freebase.valuenotation.is_reviewed
+90: visual_art.artwork.artist
+91: book.author.works_written
+92: symbols.name_source.namesakes
+93: visual_art.visual_artist.associated_periods_or_movements
+94: visual_art.artwork.artist
+95: people.person.spouse_s
+96: influence.influence_node.influenced_by
+97: freebase.valuenotation.is_reviewed
+98: visual_art.visual_artist.art_series
+99: people.deceased_person.cause_of_death
+100: freebase.valuenotation.is_reviewed
+101: influence.influence_node.influenced
+102: influence.influence_node.influenced_by
+103: book.written_work.author
+104: influence.influence_node.influenced
+105: influence.influence_node.influenced
+106: people.person.parents
+107: visual_art.artwork.artist
+108: visual_art.artwork.artist
+109: visual_art.artwork.artist
+110: visual_art.artwork.artist
+111: exhibitions.exhibition.subjects
+112: visual_art.artwork.artist
+113: freebase.valuenotation.is_reviewed
+114: people.deceased_person.place_of_death
+115: people.person.profession
+116: people.place_lived.person
+117: common.topic.notable_for
+118: exhibitions.exhibition_subject.exhibitions_created_about_this_subject
+119: freebase.valuenotation.is_reviewed
+120: influence.influence_node.influenced_by
+121: visual_art.visual_artist.associated_periods_or_movements
+122: visual_art.artwork.artist
+123: visual_art.artwork.artist
+124: people.person.gender
+125: influence.influence_node.influenced
+126: influence.influence_node.influenced_by
+127: visual_art.artwork.artist
+128: visual_art.artwork.artist
+129: visual_art.artwork.artist
+130: influence.influence_node.influenced
+131: visual_art.artwork.artist
+132: visual_art.artwork.artist
+133: freebase.valuenotation.is_reviewed
+134: visual_art.artwork.artist
+135: symbols.namesake.named_after
+136: visual_art.visual_artist.art_forms
+137: freebase.valuenotation.is_reviewed
+138: people.person.ethnicity
+139: freebase.valuenotation.is_reviewed
+140: freebase.valuenotation.is_reviewed
+141: visual_art.visual_artist.associated_periods_or_movements
+142: visual_art.visual_artist.art_forms
+143: freebase.valuenotation.has_value
+144: exhibitions.exhibition.subjects
+145: visual_art.artwork.artist
+146: visual_art.visual_artist.art_forms
+147: visual_art.artwork.artist
+148: visual_art.artwork.artist
+149: visual_art.artwork.artist Only return the index of the 3 selected reasoning path in a list.
+
+[2] role=assistant
+Answer: [40, 48, 93, 121, 141]
+
+USER PROMPT TEMPLATE:
+Considering the planning context {plan_context} and the given question {question}, 
+you are asked to choose the best {beam_width} reasoning paths from the following candidates with the highest probability to lead to a useful reasoning path for answering the question. {reasoning_paths}. 
+
+Only return the index of the {beam_width} selected reasoning paths in a list.
+
+
+----------------------------------------------------------------------------------------------------
+reasoning_path_parser_prompt: Reasoning path verbalization before deductive verifier
+----------------------------------------------------------------------------------------------------
+SYSTEM:
+You are asked to transfer the reasoning path to a statment, for example, convet the reasoning path 'Henri Matisse->book.written_work.subjects->Matisse, Picasso' to 'Henri Matisse wrote a book about Matisse and Picasso'.
+
+EXAMPLES (0 messages):
+(none)
+
+USER PROMPT TEMPLATE:
+{reasoning_path}
+
+
+----------------------------------------------------------------------------------------------------
+terminals_prune_single_prompt: Enough-evidence termination verifier
+----------------------------------------------------------------------------------------------------
+SYSTEM:
+Given a question and the starting entity from a knowledge graph, you are asked to answer whether it's sufficient for you to answer the question with the following reasoning path. For each reasoning path, respond with 'Yes' if it is sufficient, and 'No' if it is not. Your response should be either 'Yes' or 'No', corresponding to reasoning path.
+
+EXAMPLES (6 messages):
+[1] role=user
+Question: what art movements was henri matisse involved in?
+ Reasoning path: 
+Henri Matisse->book.written_work.subjects->Matisse, Picasso
+
+[2] role=assistant
+Answer: No
+
+[3] role=user
+Question: what team did tim tebow play for in college?
+Reasoning path: 
+Tim Tebow->people.sibling_relationship.sibling->m.05v4ns_
+
+[4] role=assistant
+Answer: No
+
+[5] role=user
+Question: where does selena gomez live right now 2010?
+Reasoning Path: 
+Selena Gomez->people.person.places_lived->m.04hmnxs->people.place_lived.location->New York City
+
+[6] role=assistant
+Answer: Yes
+
+USER PROMPT TEMPLATE:
+Considering the planning context {plan_context} and the given question {question}, you are asked to answer whether it's sufficient for you to answer the question with the following reasoning path. {reasoning_path}. Verify if it is sufficient to answer the question with each of the provided reasoning path. Your response should either 'Yes' or 'No', corresponding to reasoning path. 
+Answer:
+
+
+----------------------------------------------------------------------------------------------------
+deductive_verifier_prompt: Deductive termination verifier
+----------------------------------------------------------------------------------------------------
+SYSTEM:
+You are asked to verify whether the reasoning step follows deductively from the question and the current reasoning path in a deductive manner. If yes return yes, if no, return no
+
+EXAMPLES (0 messages):
+(none)
+
+USER PROMPT TEMPLATE:
+Whether the conclusion '{declarative_statement}' can be deduced from '{parsed_reasoning_path}', if yes, return yes, if no, return no.
+
+
+----------------------------------------------------------------------------------------------------
+reasoning_prompt: Final answer generation
+----------------------------------------------------------------------------------------------------
+SYSTEM:
+Given a question and the associated retrieved reasoning path from a knowledge graph, you are asked to answer the following question based on the reasoning path and your knowledge. Only return the answer to the question.
+
+EXAMPLES (10 messages):
+[1] role=user
+Question: what art movements was henri matisse involved in? 
+Reasoning path: Henri Matisse->visual_art.visual_artist.associated_periods_or_movements->Neo-impressionism
+
+[2] role=assistant
+Answer: Neo-impressionism
+
+[3] role=user
+Question: what team did tim tebow play for in college
+ Reasoning path: Tim Tebow->sports.sports_team_roster.player->m.0hpc6gc->sports.sports_team_roster.team->Florida Gators football
+
+[4] role=assistant
+Answer: Florida Gators football
+
+[5] role=user
+Question: who won 2012 presidential election in france?
+Reasoning path: French presidential election, 2012->government.election.winner->François Hollande
+
+[6] role=assistant
+Answer: François Hollande
+
+[7] role=user
+Question: what is the name of the person who wrote the book that was made into the movie that won the Academy Award for Best Picture in 2014?
+Reasoning path: Academy Award for Best Picture, 2014->film.film.film_award_wins->12 Years a Slave->film.film.written_by->John Ridley
+
+[8] role=assistant
+Answer: John Ridley
+
+[9] role=user
+Question: where does selena gomez live right now 2010?
+Reasoning Path: Selena Gomez->people.person.places_lived->m.04hmnxs->people.place_lived.location->New York City
+
+[10] role=assistant
+Answer: New York City
+
+USER PROMPT TEMPLATE:
+Given a question and the associated retrieved reasoning path from a knowledge graph, you are asked to answer the following question based on the reasoning path and your knowledge. 
+Question: {question} 
+Reasoning path: {reasoning_path} 
+Only return the answer to the question.
+
+
+====================================================================================================
+Dataset prompt module: RoG-cwq
+Source: src/prompts/cwq.py
+====================================================================================================
+
+----------------------------------------------------------------------------------------------------
+plan_prompt: Planning / keyword generation
+----------------------------------------------------------------------------------------------------
+SYSTEM:
+You are a helpful assistant designed to output JSON that aids in navigating a knowledge graph to answer a provided question. The response should include the following keys: (1) 'keywords': an exhaustive list of keywords or relation names that you would use to find the reasoning path from the knowledge graph to answer the question. Aim for maximum coverage to ensure no potential reasoning paths will be overlooked; (2) 'planning_steps': a list of detailed steps required to trace the reasoning path with. Each step should be a string instead of a dict. (3) 'declarative_statement': a string of declarative statement that can be transformed from the given query, For example, convert the question 'What do Jamaican people speak?' into the statement 'Jamaican people speak *placeholder*.' leave the *placeholder* unchanged; Ensure the JSON object clearly separates these components.
+
+EXAMPLES (0 messages):
+(none)
+
+USER PROMPT TEMPLATE:
+{question}?
+
+
+----------------------------------------------------------------------------------------------------
+beam_search_prompt: LLM beam candidate selection
+----------------------------------------------------------------------------------------------------
+SYSTEM:
+Given a question and the starting entity from a knowledge graph, you are asked to retrieve reasoning paths from the given reasoning paths that are useful for answering the question.
+
+EXAMPLES (2 messages):
+[1] role=user
+Question: what art movements was henri matisse involved in?
+ To proceed, the starting entity is Henri Matisse
+ Out of the following candidates for the next step, choose the best 5 with the highest probability to lead to a useful reasoning path for answering the question. 
+Candidates: 1: book.written_work.subjects
+2: exhibitions.exhibition_subject.exhibitions_created_about_this_subject
+3: influence.influence_node.peers
+4: visual_art.artwork.artist
+5: book.author.works_written
+6: influence.influence_node.influenced
+7: visual_art.art_series.artist
+8: book.book_subject.works
+9: influence.influence_node.influenced_by
+10: people.person.profession
+11: common.topic.article
+12: influence.influence_node.influenced
+13: common.topic.notable_for
+14: education.education.student
+15: influence.influence_node.influenced_by
+16: influence.influence_node.influenced
+17: influence.influence_node.influenced_by
+18: common.topic.notable_types
+19: influence.influence_node.influenced
+20: influence.influence_node.influenced_by
+21: base.patronage.patron_client_relationship.client
+22: influence.influence_node.influenced
+23: visual_art.artwork.artist
+24: education.education.student
+25: book.written_work.author
+26: visual_art.artwork.artist
+27: exhibitions.exhibition.subjects
+28: visual_art.artwork.artist
+29: book.written_work.author
+30: visual_art.visual_artist.art_forms
+31: book.book_subject.works
+32: visual_art.artwork.artist
+33: people.person.nationality
+34: visual_art.visual_art_form.artists
+35: influence.influence_node.influenced_by
+36: visual_art.artwork.artist
+37: people.person.parents
+38: visual_art.artwork.artist
+39: influence.influence_node.influenced_by
+40: visual_art.art_period_movement.associated_artists
+41: influence.influence_node.influenced_by
+42: people.person.parents
+43: base.patronage.patron_client_relationship.client
+44: exhibitions.exhibition_subject.exhibitions_created_about_this_subject
+45: exhibitions.exhibition.subjects
+46: visual_art.visual_artist.art_series
+47: visual_art.artwork.artist
+48: visual_art.visual_artist.associated_periods_or_movements
+49: influence.peer_relationship.peers
+50: exhibitions.exhibition.subjects
+51: visual_art.artwork.artist
+52: influence.influence_node.influenced
+53: influence.influence_node.influenced_by
+54: influence.influence_node.influenced
+55: influence.influence_node.influenced_by
+56: influence.influence_node.influenced_by
+57: visual_art.artwork.artist
+58: exhibitions.exhibition_subject.exhibitions_created_about_this_subject
+59: book.written_work.subjects
+60: influence.influence_node.influenced
+61: people.person.parents
+62: influence.influence_node.influenced_by
+63: influence.influence_node.peers
+64: exhibitions.exhibition.subjects
+65: base.patronage.patron_client_relationship.client
+66: film.personal_film_appearance.person
+67: influence.influence_node.influenced_by
+68: common.webpage.topic
+69: exhibitions.exhibition.subjects
+70: influence.influence_node.influenced_by
+71: common.image.appears_in_topic_gallery
+72: people.person.place_of_birth
+73: book.written_work.author
+74: film.film_character.portrayed_in_films
+75: influence.influence_node.influenced
+76: influence.influence_node.peers
+77: people.person.parents
+78: base.patronage.client.related_patron
+79: influence.influence_node.influenced
+80: influence.influence_node.influenced_by
+81: influence.influence_node.influenced_by
+82: book.written_work.subjects
+83: influence.influence_node.peers
+84: influence.influence_node.influenced
+85: symbols.namesake.named_after
+86: influence.influence_node.influenced_by
+87: visual_art.artwork.artist
+88: common.image.size
+89: freebase.valuenotation.is_reviewed
+90: visual_art.artwork.artist
+91: book.author.works_written
+92: symbols.name_source.namesakes
+93: visual_art.visual_artist.associated_periods_or_movements
+94: visual_art.artwork.artist
+95: people.person.spouse_s
+96: influence.influence_node.influenced_by
+97: freebase.valuenotation.is_reviewed
+98: visual_art.visual_artist.art_series
+99: people.deceased_person.cause_of_death
+100: freebase.valuenotation.is_reviewed
+101: influence.influence_node.influenced
+102: influence.influence_node.influenced_by
+103: book.written_work.author
+104: influence.influence_node.influenced
+105: influence.influence_node.influenced
+106: people.person.parents
+107: visual_art.artwork.artist
+108: visual_art.artwork.artist
+109: visual_art.artwork.artist
+110: visual_art.artwork.artist
+111: exhibitions.exhibition.subjects
+112: visual_art.artwork.artist
+113: freebase.valuenotation.is_reviewed
+114: people.deceased_person.place_of_death
+115: people.person.profession
+116: people.place_lived.person
+117: common.topic.notable_for
+118: exhibitions.exhibition_subject.exhibitions_created_about_this_subject
+119: freebase.valuenotation.is_reviewed
+120: influence.influence_node.influenced_by
+121: visual_art.visual_artist.associated_periods_or_movements
+122: visual_art.artwork.artist
+123: visual_art.artwork.artist
+124: people.person.gender
+125: influence.influence_node.influenced
+126: influence.influence_node.influenced_by
+127: visual_art.artwork.artist
+128: visual_art.artwork.artist
+129: visual_art.artwork.artist
+130: influence.influence_node.influenced
+131: visual_art.artwork.artist
+132: visual_art.artwork.artist
+133: freebase.valuenotation.is_reviewed
+134: visual_art.artwork.artist
+135: symbols.namesake.named_after
+136: visual_art.visual_artist.art_forms
+137: freebase.valuenotation.is_reviewed
+138: people.person.ethnicity
+139: freebase.valuenotation.is_reviewed
+140: freebase.valuenotation.is_reviewed
+141: visual_art.visual_artist.associated_periods_or_movements
+142: visual_art.visual_artist.art_forms
+143: freebase.valuenotation.has_value
+144: exhibitions.exhibition.subjects
+145: visual_art.artwork.artist
+146: visual_art.visual_artist.art_forms
+147: visual_art.artwork.artist
+148: visual_art.artwork.artist
+149: visual_art.artwork.artist Only return the index of the 3 selected reasoning path in a list.
+
+[2] role=assistant
+Answer: [40, 48, 93, 121, 141]
+
+USER PROMPT TEMPLATE:
+Considering the planning context {plan_context} and the given question {question}, 
+you are asked to choose the best {beam_width} reasoning paths from the following candidates with the highest probability to lead to a useful reasoning path for answering the question. {reasoning_paths}. 
+
+Only return the index of the {beam_width} selected reasoning paths in a list.
+
+
+----------------------------------------------------------------------------------------------------
+reasoning_path_parser_prompt: Reasoning path verbalization before deductive verifier
+----------------------------------------------------------------------------------------------------
+SYSTEM:
+You are asked to transfer the reasoning path to a statment, for example, convet the reasoning path 'Henri Matisse->book.written_work.subjects->Matisse, Picasso' to 'Henri Matisse wrote a book about Matisse and Picasso'.
+
+EXAMPLES (0 messages):
+(none)
+
+USER PROMPT TEMPLATE:
+{reasoning_path}
+
+
+----------------------------------------------------------------------------------------------------
+terminals_prune_single_prompt: Enough-evidence termination verifier
+----------------------------------------------------------------------------------------------------
+SYSTEM:
+Given a question and the starting entity from a knowledge graph, you are asked to answer whether it's sufficient for you to answer the question with the following reasoning path. For each reasoning path, respond with 'Yes' if it is sufficient, and 'No' if it is not. Your response should be either 'Yes' or 'No', corresponding to reasoning path.
+
+EXAMPLES (0 messages):
+(none)
+
+USER PROMPT TEMPLATE:
+Considering the planning context {plan_context} and the given question {question}, you are asked to answer whether it's sufficient for you to answer the question with the following reasoning path. {reasoning_path}. Verify if it is sufficient to answer the question with each of the provided reasoning path. Your response should either 'Yes' or 'No', corresponding to reasoning path. 
+Answer:
+
+
+----------------------------------------------------------------------------------------------------
+deductive_verifier_prompt: Deductive termination verifier
+----------------------------------------------------------------------------------------------------
+SYSTEM:
+You are asked to verify whether the reasoning step follows deductively from the question and the current reasoning path in a deductive manner. If yes return yes, if no, return no
+
+EXAMPLES (0 messages):
+(none)
+
+USER PROMPT TEMPLATE:
+Whether the conclusion '{declarative_statement}' can be deduced from '{parsed_reasoning_path}', if yes, return yes, if no, return no.
+
+
+----------------------------------------------------------------------------------------------------
+reasoning_prompt: Final answer generation
+----------------------------------------------------------------------------------------------------
+SYSTEM:
+Given a question and the associated retrieved reasoning path from a knowledge graph, you are asked to answer the following question based on the reasoning path and your knowledge. Only return the answer to the question.
+
+EXAMPLES (10 messages):
+[1] role=user
+Question: what art movements was henri matisse involved in? 
+Reasoning path: Henri Matisse->visual_art.visual_artist.associated_periods_or_movements->Neo-impressionism
+
+[2] role=assistant
+Answer: Neo-impressionism
+
+[3] role=user
+Question: what team did tim tebow play for in college
+ Reasoning path: Tim Tebow->sports.sports_team_roster.player->m.0hpc6gc->sports.sports_team_roster.team->Florida Gators football
+
+[4] role=assistant
+Answer: Florida Gators football
+
+[5] role=user
+Question: who won 2012 presidential election in france?
+Reasoning path: French presidential election, 2012->government.election.winner->François Hollande
+
+[6] role=assistant
+Answer: François Hollande
+
+[7] role=user
+Question: what is the name of the person who wrote the book that was made into the movie that won the Academy Award for Best Picture in 2014?
+Reasoning path: Academy Award for Best Picture, 2014->film.film.film_award_wins->12 Years a Slave->film.film.written_by->John Ridley
+
+[8] role=assistant
+Answer: John Ridley
+
+[9] role=user
+Question: where does selena gomez live right now 2010?
+Reasoning Path: Selena Gomez->people.person.places_lived->m.04hmnxs->people.place_lived.location->New York City
+
+[10] role=assistant
+Answer: New York City
+
+USER PROMPT TEMPLATE:
+Given a question and the associated retrieved reasoning path from a knowledge graph, you are asked to answer the following question based on the reasoning path and your knowledge. 
+Question: {question} 
+Reasoning path: {reasoning_path} 
+Only return the answer to the question.
+
+
+====================================================================================================
+Dataset prompt module: CL-LT-KGQA
+Source: src/prompts/cl_lt_kgqa.py
+====================================================================================================
+
+----------------------------------------------------------------------------------------------------
+plan_prompt: Planning / keyword generation
+----------------------------------------------------------------------------------------------------
+SYSTEM:
+You are a helpful assistant designed to output JSON that aids in navigating a knowledge graph to answer a provided question. The response should include the following keys: (1) 'keywords': an exhaustive list of keywords or relation names that you would use to find the reasoning path from the knowledge graph to answer the question. Aim for maximum coverage to ensure no potential reasoning paths will be overlooked; (2) 'planning_steps': a list of detailed steps required to trace the reasoning path with. Each step should be a string instead of a dict. (3) 'declarative_statement': a string of declarative statement that can be transformed from the given query, For example, convert the question 'What do Jamaican people speak?' into the statement 'Jamaican people speak *placeholder*.' leave the *placeholder* unchanged; Ensure the JSON object clearly separates these components.
+
+EXAMPLES (0 messages):
+(none)
+
+USER PROMPT TEMPLATE:
+{question}?
+
+
+----------------------------------------------------------------------------------------------------
+beam_search_prompt: LLM beam candidate selection
+----------------------------------------------------------------------------------------------------
+SYSTEM:
+Given a question and the starting entity from a knowledge graph, you are asked to retrieve reasoning paths from the given reasoning paths that are useful for answering the question.
+
+EXAMPLES (2 messages):
+[1] role=user
+Question: what art movements was henri matisse involved in?
+ To proceed, the starting entity is Henri Matisse
+ Out of the following candidates for the next step, choose the best 5 with the highest probability to lead to a useful reasoning path for answering the question. 
+Candidates: 1: book.written_work.subjects
+2: exhibitions.exhibition_subject.exhibitions_created_about_this_subject
+3: influence.influence_node.peers
+4: visual_art.artwork.artist
+5: book.author.works_written
+6: influence.influence_node.influenced
+7: visual_art.art_series.artist
+8: book.book_subject.works
+9: influence.influence_node.influenced_by
+10: people.person.profession
+11: common.topic.article
+12: influence.influence_node.influenced
+13: common.topic.notable_for
+14: education.education.student
+15: influence.influence_node.influenced_by
+16: influence.influence_node.influenced
+17: influence.influence_node.influenced_by
+18: common.topic.notable_types
+19: influence.influence_node.influenced
+20: influence.influence_node.influenced_by
+21: base.patronage.patron_client_relationship.client
+22: influence.influence_node.influenced
+23: visual_art.artwork.artist
+24: education.education.student
+25: book.written_work.author
+26: visual_art.artwork.artist
+27: exhibitions.exhibition.subjects
+28: visual_art.artwork.artist
+29: book.written_work.author
+30: visual_art.visual_artist.art_forms
+31: book.book_subject.works
+32: visual_art.artwork.artist
+33: people.person.nationality
+34: visual_art.visual_art_form.artists
+35: influence.influence_node.influenced_by
+36: visual_art.artwork.artist
+37: people.person.parents
+38: visual_art.artwork.artist
+39: influence.influence_node.influenced_by
+40: visual_art.art_period_movement.associated_artists
+41: influence.influence_node.influenced_by
+42: people.person.parents
+43: base.patronage.patron_client_relationship.client
+44: exhibitions.exhibition_subject.exhibitions_created_about_this_subject
+45: exhibitions.exhibition.subjects
+46: visual_art.visual_artist.art_series
+47: visual_art.artwork.artist
+48: visual_art.visual_artist.associated_periods_or_movements
+49: influence.peer_relationship.peers
+50: exhibitions.exhibition.subjects
+51: visual_art.artwork.artist
+52: influence.influence_node.influenced
+53: influence.influence_node.influenced_by
+54: influence.influence_node.influenced
+55: influence.influence_node.influenced_by
+56: influence.influence_node.influenced_by
+57: visual_art.artwork.artist
+58: exhibitions.exhibition_subject.exhibitions_created_about_this_subject
+59: book.written_work.subjects
+60: influence.influence_node.influenced
+61: people.person.parents
+62: influence.influence_node.influenced_by
+63: influence.influence_node.peers
+64: exhibitions.exhibition.subjects
+65: base.patronage.patron_client_relationship.client
+66: film.personal_film_appearance.person
+67: influence.influence_node.influenced_by
+68: common.webpage.topic
+69: exhibitions.exhibition.subjects
+70: influence.influence_node.influenced_by
+71: common.image.appears_in_topic_gallery
+72: people.person.place_of_birth
+73: book.written_work.author
+74: film.film_character.portrayed_in_films
+75: influence.influence_node.influenced
+76: influence.influence_node.peers
+77: people.person.parents
+78: base.patronage.client.related_patron
+79: influence.influence_node.influenced
+80: influence.influence_node.influenced_by
+81: influence.influence_node.influenced_by
+82: book.written_work.subjects
+83: influence.influence_node.peers
+84: influence.influence_node.influenced
+85: symbols.namesake.named_after
+86: influence.influence_node.influenced_by
+87: visual_art.artwork.artist
+88: common.image.size
+89: freebase.valuenotation.is_reviewed
+90: visual_art.artwork.artist
+91: book.author.works_written
+92: symbols.name_source.namesakes
+93: visual_art.visual_artist.associated_periods_or_movements
+94: visual_art.artwork.artist
+95: people.person.spouse_s
+96: influence.influence_node.influenced_by
+97: freebase.valuenotation.is_reviewed
+98: visual_art.visual_artist.art_series
+99: people.deceased_person.cause_of_death
+100: freebase.valuenotation.is_reviewed
+101: influence.influence_node.influenced
+102: influence.influence_node.influenced_by
+103: book.written_work.author
+104: influence.influence_node.influenced
+105: influence.influence_node.influenced
+106: people.person.parents
+107: visual_art.artwork.artist
+108: visual_art.artwork.artist
+109: visual_art.artwork.artist
+110: visual_art.artwork.artist
+111: exhibitions.exhibition.subjects
+112: visual_art.artwork.artist
+113: freebase.valuenotation.is_reviewed
+114: people.deceased_person.place_of_death
+115: people.person.profession
+116: people.place_lived.person
+117: common.topic.notable_for
+118: exhibitions.exhibition_subject.exhibitions_created_about_this_subject
+119: freebase.valuenotation.is_reviewed
+120: influence.influence_node.influenced_by
+121: visual_art.visual_artist.associated_periods_or_movements
+122: visual_art.artwork.artist
+123: visual_art.artwork.artist
+124: people.person.gender
+125: influence.influence_node.influenced
+126: influence.influence_node.influenced_by
+127: visual_art.artwork.artist
+128: visual_art.artwork.artist
+129: visual_art.artwork.artist
+130: influence.influence_node.influenced
+131: visual_art.artwork.artist
+132: visual_art.artwork.artist
+133: freebase.valuenotation.is_reviewed
+134: visual_art.artwork.artist
+135: symbols.namesake.named_after
+136: visual_art.visual_artist.art_forms
+137: freebase.valuenotation.is_reviewed
+138: people.person.ethnicity
+139: freebase.valuenotation.is_reviewed
+140: freebase.valuenotation.is_reviewed
+141: visual_art.visual_artist.associated_periods_or_movements
+142: visual_art.visual_artist.art_forms
+143: freebase.valuenotation.has_value
+144: exhibitions.exhibition.subjects
+145: visual_art.artwork.artist
+146: visual_art.visual_artist.art_forms
+147: visual_art.artwork.artist
+148: visual_art.artwork.artist
+149: visual_art.artwork.artist Only return the index of the 3 selected reasoning path in a list.
+
+[2] role=assistant
+Answer: [40, 48, 93, 121, 141]
+
+USER PROMPT TEMPLATE:
+Considering the planning context {plan_context} and the given question {question}, 
+you are asked to choose the best {beam_width} reasoning paths from the following candidates with the highest probability to lead to a useful reasoning path for answering the question. {reasoning_paths}. 
+
+Only return the index of the {beam_width} selected reasoning paths in a list.
+
+
+----------------------------------------------------------------------------------------------------
+reasoning_path_parser_prompt: Reasoning path verbalization before deductive verifier
+----------------------------------------------------------------------------------------------------
+SYSTEM:
+You are asked to transfer the reasoning path to a statment, for example, convet the reasoning path 'Henri Matisse->book.written_work.subjects->Matisse, Picasso' to 'Henri Matisse wrote a book about Matisse and Picasso'.
+
+EXAMPLES (0 messages):
+(none)
+
+USER PROMPT TEMPLATE:
+{reasoning_path}
+
+
+----------------------------------------------------------------------------------------------------
+terminals_prune_single_prompt: Enough-evidence termination verifier
+----------------------------------------------------------------------------------------------------
+SYSTEM:
+Given a question and the starting entity from a knowledge graph, you are asked to answer whether it's sufficient for you to answer the question with the following reasoning path. For each reasoning path, respond with 'Yes' if it is sufficient, and 'No' if it is not. Your response should be either 'Yes' or 'No', corresponding to reasoning path.
+
+EXAMPLES (0 messages):
+(none)
+
+USER PROMPT TEMPLATE:
+Considering the planning context {plan_context} and the given question {question}, you are asked to answer whether it's sufficient for you to answer the question with the following reasoning path. {reasoning_path}. Verify if it is sufficient to answer the question with each of the provided reasoning path. Your response should either 'Yes' or 'No', corresponding to reasoning path. 
+Answer:
+
+
+----------------------------------------------------------------------------------------------------
+deductive_verifier_prompt: Deductive termination verifier
+----------------------------------------------------------------------------------------------------
+SYSTEM:
+You are asked to verify whether the reasoning step follows deductively from the question and the current reasoning path in a deductive manner. If yes return yes, if no, return no
+
+EXAMPLES (0 messages):
+(none)
+
+USER PROMPT TEMPLATE:
+Whether the conclusion '{declarative_statement}' can be deduced from '{parsed_reasoning_path}', if yes, return yes, if no, return no.
+
+
+----------------------------------------------------------------------------------------------------
+reasoning_prompt: Final answer generation
+----------------------------------------------------------------------------------------------------
+SYSTEM:
+Given a question and the associated retrieved reasoning path from a knowledge graph, you are asked to verifiy the correctiness of the following question based on the reasoning path and your knowledge. Only return the True or False to the question.
+
+EXAMPLES (10 messages):
+[1] role=user
+Question: what art movements was henri matisse involved in? 
+Reasoning path: Henri Matisse->visual_art.visual_artist.associated_periods_or_movements->Neo-impressionism
+
+[2] role=assistant
+Answer: Neo-impressionism
+
+[3] role=user
+Question: what team did tim tebow play for in college
+ Reasoning path: Tim Tebow->sports.sports_team_roster.player->m.0hpc6gc->sports.sports_team_roster.team->Florida Gators football
+
+[4] role=assistant
+Answer: Florida Gators football
+
+[5] role=user
+Question: who won 2012 presidential election in france?
+Reasoning path: French presidential election, 2012->government.election.winner->François Hollande
+
+[6] role=assistant
+Answer: François Hollande
+
+[7] role=user
+Question: what is the name of the person who wrote the book that was made into the movie that won the Academy Award for Best Picture in 2014?
+Reasoning path: Academy Award for Best Picture, 2014->film.film.film_award_wins->12 Years a Slave->film.film.written_by->John Ridley
+
+[8] role=assistant
+Answer: John Ridley
+
+[9] role=user
+Question: where does selena gomez live right now 2010?
+Reasoning Path: Selena Gomez->people.person.places_lived->m.04hmnxs->people.place_lived.location->New York City
+
+[10] role=assistant
+Answer: New York City
+
+USER PROMPT TEMPLATE:
+Given a question and the associated retrieved reasoning path from a knowledge graph, you are asked to answer the following question based on the reasoning path and your knowledge. 
+Question: {question} 
+Reasoning path: {reasoning_path} 
+Only return the answer to the question.

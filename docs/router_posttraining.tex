@@ -1,0 +1,157 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{hyperref}
+
+\title{Post-Training a Query-Aware Router for FiDeLiS}
+\author{Project Subplan for Router Post-Training}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Starting Point}
+We assume access to a working pretrained router that maps a question to a discrete search policy for FiDeLiS. This router is already useful: it often predicts a \emph{correct} policy in the sense that FiDeLiS can still answer the question, but it does not consistently predict the \emph{best} policy for the downstream search. Here, ``best'' means the policy that gives the best trade-off between answer quality, path faithfulness, and computation cost.
+
+The post-training stage therefore does \emph{not} create a supervised oracle dataset of best hyperparameters. Instead, it treats FiDeLiS as an online environment. For each query, the router proposes or samples a search policy, FiDeLiS executes that policy, and the resulting answer/path/cost measurements are turned into a scalar reward.
+
+\section{Problem Setup}
+Let $x$ be the natural-language query and let $a \in \mathcal{A}$ be a discrete search policy. Each action $a$ corresponds to a bundle of FiDeLiS search settings such as maximum depth, beam width, candidate width, future-lookahead strength, and local path constraints. The pretrained router provides prior logits $\pi_0(a \mid x)$ over the action set. Post-training learns an improved router that adapts these prior preferences using online reward from FiDeLiS.
+
+Because the router makes one routing decision per query before search begins, the task is naturally modeled as a \textbf{contextual bandit} rather than a full multi-step MDP. This matters methodologically: we do not need to learn long-horizon temporal credit assignment inside the router, because FiDeLiS itself executes the search after the action is chosen.
+
+\section{Reward}
+For a sampled action $a$ on query $x$, FiDeLiS returns a final prediction, a set of reasoning paths, and search statistics. We compute a scalar reward as a weighted mean of bounded metrics rather than as a sum of logits or logistic outputs. A representative reward is
+\[
+R(x,a) =
+w_{\text{hit}} \cdot \mathrm{Hit}
++ w_{\text{f1}} \cdot \mathrm{F1}
++ w_{\text{path}} \cdot \mathrm{PathSupport}
++ w_{\text{eff}} \cdot \mathrm{Efficiency},
+\]
+where:
+\begin{itemize}[leftmargin=1.5em]
+\item $\mathrm{Hit} \in \{0,1\}$ indicates whether the final answer is correct.
+\item $\mathrm{F1} \in [0,1]$ gives partial credit on multi-answer questions.
+\item $\mathrm{PathSupport} \in [0,1]$ measures agreement between predicted reasoning paths and available gold paths or gold supporting facts.
+\item $\mathrm{Efficiency} \in [0,1]$ penalizes expensive policies through runtime, number of expansions, and number of LLM calls.
+\end{itemize}
+
+This reward is directly computable from the FiDeLiS pipeline and does not require differentiability. The router only needs a scalar training signal.
+
+\section{Method 1: Value-Based Router}
+\subsection{Idea}
+The value-based router learns a function $Q_\theta(x,a)$ that predicts the expected FiDeLiS reward if action $a$ is chosen for query $x$. At inference time, it selects
+\[
+a^\star = \arg\max_{a \in \mathcal{A}} Q_\theta(x,a).
+\]
+
+\subsection{Why this method}
+This is the strongest value-style baseline for our setting because the problem is a one-step decision over a small discrete action set. We do not need Bellman bootstrapping over long trajectories; we only need to regress observed returns for chosen actions.
+
+\subsection{Small theory section}
+In a contextual bandit, the optimal policy is determined by the action with the highest conditional expected reward:
+\[
+\pi^\star(x) = \arg\max_a \mathbb{E}[R \mid x,a].
+\]
+If $Q_\theta(x,a)$ is a good estimator of this quantity, greedy action selection is Bayes-optimal with respect to the learned model. In practice, we learn $Q_\theta$ by online regression on observed tuples $(x,a,R)$ collected during exploration.
+
+\subsection{How we use the pretrained router}
+The pretrained router supplies prior logits over actions. We do not discard them. Instead, we use them as prior features and let the value head learn a better estimate of downstream reward. This is appropriate when the pretrained model is usually reasonable but not yet optimal.
+
+\section{Method 2: Ranking-Based Router}
+\subsection{Idea}
+The ranking-based router learns a utility score $U_\theta(x,a)$ and trains on \emph{relative} preferences between actions for the same query. If action $a_i$ gives higher observed reward than $a_j$ on the same query, the model is updated to rank $a_i$ above $a_j$.
+
+\subsection{Why this method}
+Ranking is appealing when absolute rewards are noisy, scale-sensitive, or variable across datasets. The main question for routing is often not ``what is the precise reward?'' but rather ``which of these policies is better for this query?'' Pairwise preference learning targets that question directly.
+
+\subsection{Small theory section}
+We model pairwise preference probabilities with a Bradley--Terry style form:
+\[
+P(a_i \succ a_j \mid x) = \sigma(U_\theta(x,a_i) - U_\theta(x,a_j)),
+\]
+where $\sigma$ is the logistic sigmoid. Given two actions tried on the same query, we define the preferred action using the observed FiDeLiS reward and optimize a pairwise logistic loss. This turns noisy scalar feedback into a more robust ordering objective.
+
+\subsection{How we use the pretrained router}
+Again, the pretrained router acts as an informative prior. The ranking head can be initialized from, or conditioned on, the pretrained action logits. The learned utility then re-orders policies using online FiDeLiS outcomes.
+
+\section{Method 3: Bandit-Style RL Fine-Tuning}
+\subsection{Idea}
+The bandit RL router directly fine-tunes the action distribution $\pi_\theta(a \mid x)$ using policy gradient. We sample an action, execute FiDeLiS, obtain reward $R$, and update the router with a one-step policy objective.
+
+\subsection{Why this method}
+This is the most direct way to optimize the actual routing objective without constructing oracle labels. It is especially useful once the pretrained router is already good, because RL can make small policy adjustments toward higher reward while respecting the prior.
+
+\subsection{Small theory section}
+Because each episode consists of a single decision, REINFORCE reduces to
+\[
+\nabla_\theta J(\theta)
+=
+\mathbb{E}_{a \sim \pi_\theta(\cdot \mid x)}
+\left[(R-b)\nabla_\theta \log \pi_\theta(a \mid x)\right],
+\]
+where $b$ is a baseline used to reduce variance. We additionally regularize the updated policy toward the pretrained router so that fine-tuning stays close to a model that is already mostly correct. This is more suitable here than treating the problem as a full PPO-style trajectory optimization problem, since the routing decision is fundamentally one-step.
+
+\subsection{Relation to the other two methods}
+The value-based router predicts expected reward. The ranking-based router predicts relative utility. The bandit RL router optimizes the policy distribution itself. Together they form a clean comparison across three distinct post-training styles.
+
+\section{Experimental Plan}
+\subsection{Action space}
+Each action corresponds to a policy bundle over FiDeLiS arguments:
+\begin{itemize}[leftmargin=1.5em]
+\item search depth (`max\_length`);
+\item beam width (`top\_k`);
+\item candidate width (`top\_n`);
+\item future-score weight (`alpha`);
+\item lookahead depth (`lookahead\_hops`);
+\item local search constraints such as no immediate backtracking and simple-path enforcement.
+\end{itemize}
+The action set stays small and discrete so that online exploration remains computationally feasible.
+
+\subsection{Training protocol}
+We use only the raw train split of the project dataset and online FiDeLiS reward. No supervised oracle routing dataset is created. For each method:
+\begin{enumerate}[leftmargin=1.5em]
+\item initialize from the pretrained router outputs;
+\item explore actions online on training queries;
+\item compute reward from FiDeLiS outputs;
+\item update the corresponding post-training head;
+\item evaluate greedily on held-out validation and test splits.
+\end{enumerate}
+
+\subsection{Metrics}
+We report:
+\begin{itemize}[leftmargin=1.5em]
+\item answer Hit and F1;
+\item path-support / faithfulness proxy;
+\item average runtime;
+\item average number of LLM calls;
+\item average number of path expansions;
+\item scalar reward.
+\end{itemize}
+The scalar reward is the training objective; the metric table shows the underlying trade-offs.
+
+\subsection{Ablations}
+The router post-training component will be compared under:
+\begin{itemize}[leftmargin=1.5em]
+\item no router (original FiDeLiS fixed policy);
+\item pretrained router without post-training;
+\item value-based post-training;
+\item ranking-based post-training;
+\item bandit RL fine-tuning;
+\item without query-constraint inputs;
+\item without no-backtracking / simple-path search constraints.
+\end{itemize}
+
+\section{Expected Outcome}
+The main hypothesis is not that one universal policy dominates all queries. Rather, different queries benefit from different search budgets and constraints, and a pretrained router can be improved by post-training directly against FiDeLiS reward. We expect:
+\begin{itemize}[leftmargin=1.5em]
+\item the value-based router to be stable and sample-efficient;
+\item the ranking-based router to be robust when reward magnitudes are noisy;
+\item bandit-style RL to produce the best final reward once initialized from a competent pretrained model.
+\end{itemize}
+
+\end{document}

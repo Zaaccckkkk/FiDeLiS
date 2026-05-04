@@ -27,6 +27,10 @@ class LLM_Navigator():
       if args.d == "CL-LT-KGQA":
          self.prompt_list = prompt_cl_lt_kgqa
       self._new_line_char = "\n" # for formatting the prompt
+
+   def _policy_value(self, state: dict, key: str, default):
+      policy = state.get("policy", {})
+      return policy.get(key, getattr(self.args, key, default))
       
    def rpth_parser(
       self, 
@@ -58,9 +62,9 @@ class LLM_Navigator():
       placeholder_entity = reasoning_path.split(" -> ")[-1]
       declarative_statement = declarative_statement.replace("*placeholder*", placeholder_entity).strip(".")
       
-      # print(self.args.verifier)
+      verifier = self._policy_value(state, "verifier", self.args.verifier)
       
-      if self.args.verifier == "enough":    
+      if verifier == "enough":    
         condition_prompt = copy.copy(self.prompt_list.terminals_prune_single_prompt)
         condition_prompt["prompt"] = condition_prompt["prompt"].format(
             question=question,
@@ -69,11 +73,11 @@ class LLM_Navigator():
         )
       
       #TODO: add more verifiers
-      elif self.args.verifier == "enough+planning": 
+      elif verifier == "enough+planning": 
          pass
-      elif self.args.verifier == "enough+planning+confidence":
+      elif verifier == "enough+planning+confidence":
          pass
-      elif self.args.verifier == "deductive+planning":   
+      elif verifier == "deductive+planning":   
          condition_prompt = copy.copy(self.prompt_list.deductive_verifier_prompt)
          condition_prompt["prompt"] = condition_prompt["prompt"].format(
             parsed_reasoning_path=parsed_reasoning_path,
@@ -103,11 +107,12 @@ class LLM_Navigator():
       next_step_candidates = state.get("next_step_candidates", [])
       question = state.get("question", "")
       planning_steps = state.get("planning_steps", "")
+      beam_width = int(self._policy_value(state, "top_k", self.args.top_k))
       
       formatted_next_step_candidates = [f"{i+1}: {item}" for i, item in enumerate(next_step_candidates)]
       rating_prompt = copy.copy(self.prompt_list.beam_search_prompt)
       rating_prompt["prompt"] = self.prompt_list.beam_search_prompt["prompt"].format(
-         beam_width=self.args.top_k,
+         beam_width=beam_width,
          plan_context=planning_steps,
          question=question,
          reasoning_paths=self._new_line_char.join(formatted_next_step_candidates)
@@ -129,7 +134,7 @@ class LLM_Navigator():
             logging.info("Top-k Indices: {}".format(matched_indices))
             logging.info(">>>>>>>>")
             
-            top_k_candidates = [[next_step_candidates[i]] for i in matched_indices]
+            top_k_candidates = [[next_step_candidates[i]] for i in matched_indices[:beam_width] if i < len(next_step_candidates)]
             return top_k_candidates
    
          except Exception as e:
@@ -196,8 +201,10 @@ class LLM_Navigator():
 
    def beam_search(
       self,
-      data
-   ):   
+      data,
+      policy_overrides=None
+   ):
+      policy_overrides = policy_overrides or {}
       id  = data['id']
       question = data['question']
       hop = data['hop']
@@ -221,6 +228,13 @@ class LLM_Navigator():
       llm_states["graph"] = graph
       llm_states["answer"] = answer
       llm_states["starting_entities"] = starting_entities
+      llm_states["policy"] = policy_overrides
+      llm_states["search_metrics"] = {
+         "candidate_count": 0,
+         "path_rag_calls": 0,
+         "termination_checks": 0,
+         "completed_paths": 0,
+      }
       
       logging.info(f"Processing ID: {id}")
       logging.info(f"Question: {question}")
@@ -259,7 +273,8 @@ class LLM_Navigator():
          reasoning_paths = [] # final reasoning paths
          active_beam_reasoning_paths = [[node]] # store the reasoning paths for each step, the the length of the list is equal to the number of top-k
          
-         for step in tqdm(range(self.args.max_length + 1), desc="Beam searching...", delay=0.5, leave=False, ascii="░▒█"):
+         max_length = int(self._policy_value(llm_states, "max_length", self.args.max_length))
+         for step in tqdm(range(max_length + 1), desc="Beam searching...", delay=0.5, leave=False, ascii="░▒█"):
             
             search_span = Trace(
                name="Searcher",
@@ -276,11 +291,13 @@ class LLM_Navigator():
             
                # if meet the condition, skip the current step
                if step != 0:
+                  llm_states["search_metrics"]["termination_checks"] += 1
                   flag = self.deductive_termination(
                      state=llm_states
                   )
                   if flag:
                      reasoning_paths.append(rpth)
+                     llm_states["search_metrics"]["completed_paths"] += 1
                      continue
                   
                next_step_candidates = self.path_rag_engine.get_path(
@@ -293,7 +310,7 @@ class LLM_Navigator():
             if not all_candidates:
                break
             
-            if step != self.args.max_length: # if not the last step
+            if step != max_length: # if not the last step
                llm_states["next_step_candidates"] = all_candidates
                active_beam_reasoning_paths = self.decide_top_k_candidates(
                      state=llm_states
@@ -350,14 +367,15 @@ class LLM_Navigator():
                "id": id,
                "question": question,
                "hop": hop,
+               "policy": policy_overrides,
                "q_entities": starting_entities,
                "reasoning_path": reasoning_path_list,
                "ground_path": ground_reasoning_path_list,
                "prediction_llm": "\n".join(set(pred_list_llm_reasoning)), # remove duplicate predictions
                "prediction_direct_answer": "\n".join(set(pred_list_direct_answer)),
                "ground_truth": answer,
+               "search_metrics": llm_states["search_metrics"],
          }
       return res, root_spans
       
-
 

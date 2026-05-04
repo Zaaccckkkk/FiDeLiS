@@ -14,6 +14,12 @@ class LLM_Backbone():
       self.embedding_model = args.embedding_model
       self.completion_model = args.model_name
       self.max_attempt = 5 # number of attempts to get the completion
+      self.usage_tracker = getattr(args, "usage_tracker", None)
+
+   def _bump_tracker(self, key: str, amount: int = 1):
+      if self.usage_tracker is None:
+         return
+      self.usage_tracker[key] = self.usage_tracker.get(key, 0) + amount
       
    def get_embeddings(self, texts: list):
       if isinstance(texts, str):
@@ -40,6 +46,8 @@ class LLM_Backbone():
                   input=chunk
                   ) # return [item['embedding'] for item in _['data']]
                embeddings.extend([item.embedding for item in chunk_embeddings.data])
+               self._bump_tracker("embedding_calls", 1)
+               self._bump_tracker("embedded_text_count", len(chunk))
             return embeddings
          except Exception as e:
             logging.error(f"Error occurred: {e}")
@@ -70,6 +78,7 @@ class LLM_Backbone():
                   logprobs=False
                   )
                # return _['choices'][0]['message']['content']
+               self._bump_tracker("completion_calls", 1)
                return _.choices[0].message.content
          except Exception as e:
                logging.error(f"Error occurred: {e}")
@@ -123,6 +132,8 @@ class LLM_Backbone():
                   logprobs=True,
                   top_logprobs=5
                   )
+               self._bump_tracker("batch_completion_calls", 1)
+               self._bump_tracker("batch_prompt_count", len(messages))
                contents = [_[i]['choices'][0]['message']['content'] for i in range(len(_))]
                log_probs = [_[i]['choices'][0]['logprobs']['content'] for i in range(len(_))]
                return contents, log_probs
