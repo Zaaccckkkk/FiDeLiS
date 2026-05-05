@@ -2,7 +2,10 @@ import networkx as nx
 from collections import deque
 # from typing import List as list
 from typing import Tuple as tuple
-import walker
+try:
+    import walker
+except ImportError:
+    walker = None
 
 
 def build_graph(graph: list) -> nx.Graph:
@@ -102,6 +105,8 @@ def get_negative_paths(
     '''
     Get negative paths for question witin hop
     '''
+    if walker is None:
+        raise ImportError("walker is required for get_negative_paths. Install it with: pip install walker")
     # sample paths
     start_nodes = []
     end_nodes = []
@@ -134,6 +139,8 @@ def get_random_paths(q_entity: list, graph: nx.Graph, n=3, hop=2) -> tuple[list,
     '''
     Get negative paths for question witin hop
     '''
+    if walker is None:
+        raise ImportError("walker is required for get_random_paths. Install it with: pip install walker")
     # sample paths
     start_nodes = []
     node_idx = list(graph.nodes())

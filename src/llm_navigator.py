@@ -3,9 +3,24 @@ import copy
 import re
 import json
 import time
-import wandb
 import datetime
-from wandb.sdk.data_types.trace_tree import Trace
+try:
+   from wandb.sdk.data_types.trace_tree import Trace
+except ImportError:
+   class Trace:
+      def __init__(self, **kwargs):
+         self.__dict__.update(kwargs)
+         self.children = []
+
+      def add_child(self, child):
+         self.children.append(child)
+
+      def add_inputs_and_outputs(self, inputs=None, outputs=None):
+         self.inputs = inputs
+         self.outputs = outputs
+
+      def log(self, name=None):
+         return None
 from tqdm import tqdm
 from src import utils
 from src.prompts import webqsp as prompt_webqsp
@@ -24,7 +39,7 @@ class LLM_Navigator():
          self.prompt_list = prompt_webqsp
       elif args.d == "RoG-cwq":
          self.prompt_list = prompt_cwq
-      if args.d == "CL-LT-KGQA":
+      if args.d == "CR-LT-KGQA":
          self.prompt_list = prompt_cl_lt_kgqa
       self._new_line_char = "\n" # for formatting the prompt
       
@@ -129,13 +144,24 @@ class LLM_Navigator():
             logging.info("Top-k Indices: {}".format(matched_indices))
             logging.info(">>>>>>>>")
             
-            top_k_candidates = [[next_step_candidates[i]] for i in matched_indices]
-            return top_k_candidates
+            valid_indices = [i for i in matched_indices if 0 <= i < len(next_step_candidates)]
+            if valid_indices:
+               top_k_candidates = [[next_step_candidates[i]] for i in valid_indices[:self.args.top_k]]
+               return top_k_candidates
+
+            logging.warning(
+               "No valid beam indices parsed from LLM response `%s`; falling back to first available candidates.",
+               rating_index,
+            )
+            break
    
          except Exception as e:
                logging.error(f"Error occurred: {e}")
                attempt += 1
                time.sleep(1)
+
+      logging.warning("Falling back to the first available beam candidates after failing to parse LLM selection.")
+      return [[candidate] for candidate in next_step_candidates[:self.args.top_k]]
                
    def reasoning(
       self, 
@@ -275,7 +301,7 @@ class LLM_Navigator():
                llm_states["rpth"] = rpth[0]
             
                # if meet the condition, skip the current step
-               if step != 0:
+               if step != 0 and not getattr(self.args, "disable_termination_verification", True):
                   flag = self.deductive_termination(
                      state=llm_states
                   )
@@ -317,29 +343,35 @@ class LLM_Navigator():
          # --------------
          # LLM REASONING
          # --------------
-         reasoning_res = self.reasoning(llm_states)
-         reasoning_end_time_ms = round(datetime.datetime.now().timestamp() * 1000)
-         
-         reasoniong_span = Trace(
-            name="Reasoner",
-            kind="llm",
-            start_time_ms=start_time_ms,
-            end_time_ms=reasoning_end_time_ms,
-            inputs={"input": llm_states["reasoning_paths"], "question": llm_states["question"]},
-            outputs={"response": reasoning_res},
-         )
-         
-         root_span.add_child(reasoniong_span)
-         root_span.add_inputs_and_outputs(
-            inputs={"question": llm_states["question"]},
-            outputs={"response": reasoning_res}
-         )
+         if getattr(self.args, "skip_final_reasoning", False):
+            reasoning_res = ""
+            reasoning_end_time_ms = round(datetime.datetime.now().timestamp() * 1000)
+            logging.info("Skipping final reasoning LLM call; using retrieved paths only.")
+         else:
+            reasoning_res = self.reasoning(llm_states)
+            reasoning_end_time_ms = round(datetime.datetime.now().timestamp() * 1000)
+            
+            reasoniong_span = Trace(
+               name="Reasoner",
+               kind="llm",
+               start_time_ms=start_time_ms,
+               end_time_ms=reasoning_end_time_ms,
+               inputs={"input": llm_states["reasoning_paths"], "question": llm_states["question"]},
+               outputs={"response": reasoning_res},
+            )
+            
+            root_span.add_child(reasoniong_span)
+            root_span.add_inputs_and_outputs(
+               inputs={"question": llm_states["question"]},
+               outputs={"response": reasoning_res}
+            )
          root_span.end_time_ms  = reasoning_end_time_ms
          
          root_spans.append(root_span)
          
-         for item in reasoning_res.split(", "):
-            pred_list_llm_reasoning.append(item)
+         if reasoning_res:
+            for item in reasoning_res.split(", "):
+               pred_list_llm_reasoning.append(item)
          
          for item in reasoning_paths:
             pred_list_direct_answer.append(item[0].split(" -> ")[-1])
@@ -359,5 +391,3 @@ class LLM_Navigator():
          }
       return res, root_spans
       
-
-

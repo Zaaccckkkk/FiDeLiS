@@ -1,0 +1,19 @@
+{
+  "output_label_file": "router_labels/CR-LT-KGQA_train_router_labels.jsonl",
+  "output_csv_file": "router_labels/CR-LT-KGQA_train_router_labels.csv",
+  "runtime_error_file": "router_labels/CR-LT-KGQA_train_router_runtime_errors.jsonl",
+  "skipped_ids_file": "router_labels/CR-LT-KGQA_train_router_skipped_ids.jsonl",
+  "target_count": 5,
+  "usable_label_rows": 5,
+  "resolved_count": 2,
+  "unresolved_count": 3,
+  "skipped_runtime_error_samples": 0,
+  "duplicate_ids_in_label_file": [],
+  "duplicate_ids_in_skipped_file": [],
+  "bad_json_rows": {
+    "label_file": [],
+    "skipped_ids_file": []
+  },
+  "target_count_reached": true,
+  "timestamp": "2026-05-05T16:12:55"
+}

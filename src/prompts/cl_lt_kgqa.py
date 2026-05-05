@@ -1,18 +1,16 @@
 reasoning_prompt = {
-   "system": "Given a question and the associated retrieved reasoning path from a knowledge graph, you are asked to verifiy the correctiness of the following question based on the reasoning path and your knowledge. Only return the True or False to the question.",
+   "system": "You are a strict KG-grounded verifier for True/False questions.\n\nUse ONLY the retrieved KG triples / reasoning path(s) for entity-specific facts. You may use limited commonsense only as the final bridge after all entity-specific facts required by the question have already been grounded in the retrieved path(s).\n\nVerification checklist:\n1. Identify the specific subject, relation, attribute, comparison, and target required by the question.\n2. Check whether the retrieved path(s) explicitly ground every required entity-specific fact.\n3. If any required entity-specific fact is missing, return NotKnown.\n4. If all required facts are grounded, use only a minimal final-step commonsense bridge when needed.\n5. Return True only when the grounded facts support the question.\n6. Return False only when the grounded facts contradict the question.\n7. Never use memorized facts about a specific entity, person, place, organization, date, profession, family relation, nationality, language, or location.\n\nImportant output rules:\n- Only return True, False, or NotKnown.\n- Do not explain your answer.\n- Prefer NotKnown over guessing whenever the retrieved path is incomplete.",
    "examples": [
-      {"role": "user", "content": "Question: what art movements was henri matisse involved in? \nReasoning path: Henri Matisse->visual_art.visual_artist.associated_periods_or_movements->Neo-impressionism"}, 
-      {"role": "assistant", "content": "Answer: Neo-impressionism"},
-      {"role": "user", "content": "Question: what team did tim tebow play for in college\n Reasoning path: Tim Tebow->sports.sports_team_roster.player->m.0hpc6gc->sports.sports_team_roster.team->Florida Gators football"},
-      {"role": "assistant", "content": "Answer: Florida Gators football"},
-      {"role": "user", "content": "Question: who won 2012 presidential election in france?\nReasoning path: French presidential election, 2012->government.election.winner->Fran\u00e7ois Hollande"},
-      {"role": "assistant", "content": "Answer: Fran\u00e7ois Hollande"},
-      {"role": "user", "content": "Question: what is the name of the person who wrote the book that was made into the movie that won the Academy Award for Best Picture in 2014?\nReasoning path: Academy Award for Best Picture, 2014->film.film.film_award_wins->12 Years a Slave->film.film.written_by->John Ridley"},
-      {"role": "assistant", "content": "Answer: John Ridley"},
-      {"role": "user", "content": "Question: where does selena gomez live right now 2010?\nReasoning Path: Selena Gomez->people.person.places_lived->m.04hmnxs->people.place_lived.location->New York City"},
-      {"role": "assistant", "content": "Answer: New York City"}
+      {"role": "user", "content": "Question:\nDoes Leopold Lanner's wife make a living using her voice?\n\nRetrieved KG triples / reasoning path(s):\nLeopold Lanner -> spouse -> Stefanie Hertel\nStefanie Hertel -> occupation -> singer"},
+      {"role": "assistant", "content": "True"},
+      {"role": "user", "content": "Question:\nDoes Leopold Lanner's wife make a living using her voice?\n\nRetrieved KG triples / reasoning path(s):\nLeopold Lanner -> spouse -> Stefanie Hertel"},
+      {"role": "assistant", "content": "NotKnown"},
+      {"role": "user", "content": "Question:\nWould Zhou Xing prefer a centrally planned economy over a market economy?\n\nRetrieved KG triples / reasoning path(s):\nZhou Xing -> sex or gender -> male\nZhou Xing -> father -> Zhou Xian"},
+      {"role": "assistant", "content": "NotKnown"},
+      {"role": "user", "content": "Question:\nCan a person whose occupation is composer make music?\n\nRetrieved KG triples / reasoning path(s):\nExample Person -> occupation -> composer"},
+      {"role": "assistant", "content": "True"}
    ],
-   "prompt": "Given a question and the associated retrieved reasoning path from a knowledge graph, you are asked to answer the following question based on the reasoning path and your knowledge. \nQuestion: {question} \nReasoning path: {reasoning_path} \nOnly return the answer to the question."
+   "prompt": "Question:\n{question}\n\nRetrieved KG triples / reasoning path(s):\n{reasoning_path}\n\nTask:\nVerify the question using only the retrieved KG triples / reasoning path(s) for entity-specific facts.\n\nBefore answering, silently apply this checklist:\n- Are all specific entities required by the question connected by the retrieved path(s)?\n- Does the path explicitly contain the required relation, attribute, comparison target, or intermediate entity?\n- Would answering require you to know an unstated fact about a specific entity? If yes, return NotKnown.\n- Use commonsense only for the final bridge from grounded facts to the question, such as singer -> uses voice or composer -> makes music.\n- Do not use commonsense to add missing KG facts.\n\nOutput format:\nOnly return True, False, or NotKnown."
 }
 
 beam_search_prompt = {
